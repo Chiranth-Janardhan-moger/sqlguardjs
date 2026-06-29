@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
@@ -42,13 +42,10 @@ async def scan(reqs: list[DetectRequest]):
         raise HTTPException(status_code=500, detail=str(e))
 
 dashboard_path = os.path.join(os.path.dirname(__file__), "static")
-if not os.path.exists(dashboard_path):
-    os.makedirs(dashboard_path, exist_ok=True)
 
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard():
     html_file = os.path.join(dashboard_path, "index.html")
     if os.path.exists(html_file):
-        with open(html_file, "r") as f:
-            return f.read()
+        return FileResponse(html_file)
     return "<h1>SQLGuard ML Dashboard (Not Found)</h1>"

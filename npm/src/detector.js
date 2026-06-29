@@ -16,29 +16,13 @@ class Detector {
   detect(payload) {
     const decodedPayload = decodeURIComponent(payload);
     
-    let sqliScore = 0;
-    for (const p of this.sqliPatterns) {
-      if (p.test(decodedPayload)) {
-        sqliScore += 1;
-      }
-    }
-
-    let xssScore = 0;
-    for (const p of this.xssPatterns) {
-      if (p.test(decodedPayload)) {
-        xssScore += 1;
-      }
-    }
+    const sqliScore = this.sqliPatterns.filter(p => p.test(decodedPayload)).length;
+    const xssScore = this.xssPatterns.filter(p => p.test(decodedPayload)).length;
 
     const maxScore = Math.max(sqliScore, xssScore);
     const confidence = Math.min(1.0, maxScore * 0.35); // simple heuristic confidence
 
-    let label = 'benign';
-    if (sqliScore > xssScore && sqliScore > 0) {
-      label = 'sqli';
-    } else if (xssScore >= sqliScore && xssScore > 0) {
-      label = 'xss';
-    }
+    const label = sqliScore > xssScore ? 'sqli' : xssScore > 0 ? 'xss' : 'benign';
 
     return {
       label,

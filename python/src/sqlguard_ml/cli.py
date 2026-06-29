@@ -15,12 +15,6 @@ def main():
     scan_parser = subparsers.add_parser("scan-file", help="Scan a file containing payloads (one per line)")
     scan_parser.add_argument("filepath", type=str, help="Path to the file")
 
-    # train
-    train_parser = subparsers.add_parser("train", help="Train the model (placeholder)")
-    
-    # evaluate
-    evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate the model (placeholder)")
-
     args = parser.parse_args()
 
     if not args.command:
@@ -37,21 +31,11 @@ def main():
         try:
             with open(args.filepath, "r", encoding="utf-8") as f:
                 payloads = f.read().splitlines()
-            
-            results = []
-            for p in payloads:
-                if p.strip():
-                    results.append({"payload": p, "result": detector.predict(p)})
+            results = [{"payload": p, "result": detector.predict(p)} for p in payloads if p.strip()]
             print(json.dumps(results, indent=2))
         except Exception as e:
             print(f"Error scanning file: {e}")
             sys.exit(1)
-            
-    elif args.command == "train":
-        print("Training functionality not implemented yet in CLI.")
-        
-    elif args.command == "evaluate":
-        print("Evaluation functionality not implemented yet in CLI.")
 
 if __name__ == "__main__":
     main()
