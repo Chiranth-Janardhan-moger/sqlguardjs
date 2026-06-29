@@ -1,18 +1,29 @@
-How to run it
+# SQLGuard-ML: Model Training & Prediction
+
+## How to run it
+
 Open a terminal in the project root:
-sqli_xss_detection
+```bash
+cd sqlguard-ml/python
+```
 
-Install required Python packages:
-python -m pip install tensorflow pandas scikit-learn numpy
+Install the required Python packages:
+```bash
+pip install tensorflow pandas scikit-learn numpy
+```
 
-Train the model:
+### Train the model:
+```bash
 cd dataset
 python train_model.py --fast
+```
 
-This will read payload_dataset1.csv, train the network, and save:
-attack_cnn_lstm.h5
-tokenizer.json
-label_encoder.pkl
+This will read `payload_dataset1.csv`, train the neural network, and save the following artifacts:
+- `attack_cnn_lstm.h5`
+- `tokenizer.json`
+- `label_encoder.pkl`
 
-Run prediction:
+### Run prediction locally:
+```bash
 python predict.py
+```
