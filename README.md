@@ -1,4 +1,4 @@
-# 🛡️ SQLGuard ML (Machine Learning Injection Detector)
+# SQLGuard ML (Machine Learning Injection Detector)
 
 <div align="center">
   <img src="https://img.shields.io/npm/v/sqlguard-ml?color=blue&style=for-the-badge" alt="NPM Version">
@@ -8,7 +8,7 @@
 
 > **Advanced ML-powered SQL Injection (SQLi) and Cross-Site Scripting (XSS) detection engine.** Includes a Node.js heuristic scanner, Express.js middleware, and a Python FastAPI detector for maximum web application security.
 
-## 🚀 Quick Start (Node.js)
+## Quick Start (Node.js)
 
 Install the package globally or in your project via NPM:
 
@@ -30,11 +30,11 @@ See the [Usage](#-usage) section below for how to integrate it into Express.js!
 
 ---
 
-## 🚀 Installation
+## Installation
 
 SQLGuard ML is designed to be easily installable via your favorite package managers!
 
-### 🟢 Node.js / NPM (Heuristic Scanner)
+### Node.js / NPM (Heuristic Scanner)
 To install the fast heuristic CLI and NPM library globally:
 
 ```bash
@@ -46,7 +46,7 @@ Or install it as a dependency in your project:
 npm install sqlguard-ml
 ```
 
-### 🐍 Python / PyPI (Machine Learning Detector)
+### Python / PyPI (Machine Learning Detector)
 To install the deep-learning based detector and CLI:
 
 ```bash
@@ -57,7 +57,7 @@ pip install sqlguard-ml
 
 ---
 
-## 📖 Usage
+## Usage
 
 ### Using the NPM Package (`sqlguard-ml`)
 Once installed, you can use the Node CLI from anywhere:
@@ -81,7 +81,7 @@ console.log(result.label); // 'sqli'
 console.log(result.confidence);
 ```
 
-### 🛡️ Using as Express.js Middleware (New!)
+### Using as Express.js Middleware (New!)
 You can easily protect your Express.js applications by plugging in the `expressMiddleware`:
 
 ```javascript
@@ -114,7 +114,7 @@ Then visit `http://127.0.0.1:8000` to view the interactive web dashboard!
 
 ---
 
-## ⚙️ Publishing the Packages (For Maintainers)
+## Publishing the Packages (For Maintainers)
 
 Want to publish these to the official registries so that `npm i` and `pip install` work for the public? Here's how:
 
@@ -137,8 +137,8 @@ twine upload dist/*
 
 
 
-## 🤝 Contributing
+## Contributing
 Contributions, issues, and feature requests are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-## 📝 License
+## License
 Copyright © 2026. This project is [MIT](LICENSE) licensed.
