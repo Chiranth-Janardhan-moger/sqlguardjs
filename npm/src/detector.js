@@ -54,7 +54,6 @@ class Detector {
     };
   }
 }
-}
 
 function expressMiddleware(options = {}) {
   const detector = new Detector();
