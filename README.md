@@ -135,23 +135,7 @@ twine upload dist/*
 
 ---
 
-## 🔍 SEO & Keywords
-<details>
-<summary>Search Tags & Topics</summary>
 
-* `sql injection detection`
-* `xss detection`
-* `machine learning cybersecurity`
-* `cnn-lstm security model`
-* `tensorflow payload scanner`
-* `npm security package`
-* `sqlguard-ml`
-* `web application firewall (WAF) logic`
-* `cybersecurity portfolio project`
-* `heuristic attack scanner`
-* `payload analysis tool`
-* `cybersecurity open source tools`
-</details>
 
 ## 🤝 Contributing
 Contributions, issues, and feature requests are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
