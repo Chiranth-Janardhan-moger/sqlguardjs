@@ -4,7 +4,7 @@ class Detector {
       /(?:')|(?:--)|(\b(SELECT|UNION|INSERT|UPDATE|DELETE|DROP|TRUNCATE)\b)/i,
       /(?:\b(OR|AND)\b\s+['"\d\w]+\s*[=<>]\s*['"\d\w]+)/i,
       /;\s*(?:SLEEP|DELAY)\s*\(/i,
-      /(?:\$where|\$ne|\$gt|\$lt|\$gte|\$lte|\$in|\$nin|\$regex)/i // NoSQLi
+      /(?:\$where|\$ne|\$gt|\$lt|\$gte|\$lte|\$in|\$nin|\$regex)/i
     ];
     this.xssPatterns = [
       /<script\b[^>]*>([\s\S]*?)<\/script>/i,
@@ -17,10 +17,8 @@ class Detector {
   decodeDeeply(payload) {
     if (typeof payload !== 'string') return '';
     if (payload.length > 50000) payload = payload.substring(0, 50000);
-    
     let decoded = payload;
     try { decoded = decodeURIComponent(decoded); } catch (e) {}
-    
     if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(decoded)) {
       try {
         const b64Decoded = Buffer.from(decoded, 'base64').toString('utf8');
@@ -34,15 +32,11 @@ class Detector {
 
   detect(payload) {
     const decodedPayload = this.decodeDeeply(payload);
-    
     const sqliScore = this.sqliPatterns.filter(p => p.test(decodedPayload)).length;
     const xssScore = this.xssPatterns.filter(p => p.test(decodedPayload)).length;
-
     const maxScore = Math.max(sqliScore, xssScore);
     const confidence = Math.min(1.0, maxScore * 0.35);
-
     const label = sqliScore > xssScore ? 'sqli' : xssScore > 0 ? 'xss' : 'benign';
-
     return { label, confidence, scores: { sqli: sqliScore, xss: xssScore } };
   }
 }
@@ -58,7 +52,6 @@ function expressMiddleware(options = {}) {
 
   const deepScan = async (obj, ip) => {
     if (!obj || typeof obj !== 'object') return false;
-    
     for (const key of Object.keys(obj)) {
       const val = obj[key];
       if (typeof val === 'string') {
@@ -68,15 +61,24 @@ function expressMiddleware(options = {}) {
 
         if (!isMalicious && result.confidence >= 0.2 && mlEndpoint) {
           try {
-            const mlRes = await fetch(`${mlEndpoint}?payload=${encodeURIComponent(val)}`);
+            const mlRes = await fetch(mlEndpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ payload: val })
+            });
             if (mlRes.ok) {
               const mlData = await mlRes.json();
               if (mlData.prediction && mlData.prediction !== 'benign') {
                 isMalicious = true;
                 finalLabel = mlData.prediction;
+              } else if (mlData.label && mlData.label !== 'benign') {
+                isMalicious = true;
+                finalLabel = mlData.label;
               }
             }
-          } catch (e) {}
+          } catch (e) {
+             console.error("[SQLGuard] ML Bridge error:", e.message);
+          }
         }
 
         if (isMalicious) {
@@ -84,7 +86,6 @@ function expressMiddleware(options = {}) {
           return { isMalicious: true, label: finalLabel };
         }
       } else if (typeof val === 'object' && val !== null) {
-        // Prevent infinite recursion by not deeply scanning massive objects
         const nestedResult = await deepScan(val, ip);
         if (nestedResult) return nestedResult;
       }
