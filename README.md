@@ -60,6 +60,25 @@ console.log(result.label); // 'sqli'
 console.log(result.confidence);
 ```
 
+### 🛡️ Using as Express.js Middleware (New!)
+You can easily protect your Express.js applications by plugging in the `expressMiddleware`:
+
+```javascript
+const express = require('express');
+const { expressMiddleware } = require('sqlguard-ml');
+
+const app = express();
+
+// Protects req.query, req.body, and req.headers automatically!
+app.use(expressMiddleware({ threshold: 0.5 }));
+
+app.get('/api/data', (req, res) => {
+  res.send("If you see this, your request was safe!");
+});
+
+app.listen(3000);
+```
+
 ### Using the Python ML Package (`sqlguard`)
 Once installed via pip, the Python CLI is immediately available:
 
