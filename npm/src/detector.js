@@ -50,67 +50,83 @@ function expressMiddleware(options = {}) {
     console.warn(`[SQLGuard] Attack Blocked: ${label} from IP: ${ip} | Payload: ${payload}`);
   };
 
-  const scanString = async (str, ip) => {
-    const result = detector.detect(str);
-    let finalLabel = result.label;
-    let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
-
-    if (!isMalicious && result.confidence >= 0.2 && mlEndpoint) {
-      try {
-        const mlRes = await fetch(mlEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payload: str })
-        });
-        if (mlRes.ok) {
-          const mlData = await mlRes.json();
-          if (mlData.prediction && mlData.prediction !== 'benign') {
-            isMalicious = true;
-            finalLabel = mlData.prediction;
-          } else if (mlData.label && mlData.label !== 'benign') {
-            isMalicious = true;
-            finalLabel = mlData.label;
-          }
-        }
-      } catch (e) {
-         console.error("[SQLGuard] ML Bridge error:", e.message);
-      }
-    }
-
-    if (isMalicious) {
-      logAttack(ip, str, finalLabel);
-      return { isMalicious: true, label: finalLabel };
-    }
-    return false;
-  };
-
-  const deepScan = async (obj, ip) => {
-    if (!obj || typeof obj !== 'object') return false;
-    for (const key of Object.keys(obj)) {
-      // 1. Scan the key (crucial for NoSQLi like $where)
-      const keyAttack = await scanString(key, ip);
-      if (keyAttack) return keyAttack;
-
-      // 2. Scan the value
-      const val = obj[key];
-      if (typeof val === 'string') {
-        const valAttack = await scanString(val, ip);
-        if (valAttack) return valAttack;
-      } else if (typeof val === 'object' && val !== null) {
-        const nestedAttack = await deepScan(val, ip);
-        if (nestedAttack) return nestedAttack;
-      }
-    }
-    return false;
-  };
-
   return async (req, res, next) => {
     const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
-    const sources = [req.query, req.body, req.headers];
+    // BUG FIX 1: Scan params and cookies too!
+    const sources = [req.query, req.body, req.headers, req.params, req.cookies];
     
+    // BUG FIX 3: Prevent ML-driven Resource Exhaustion DoS
+    let mlCallCount = 0;
+    const MAX_ML_CALLS = 10;
+
+    const scanString = async (str) => {
+      const result = detector.detect(str);
+      let finalLabel = result.label;
+      let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
+
+      if (!isMalicious && result.confidence >= 0.2 && mlEndpoint) {
+        if (mlCallCount >= MAX_ML_CALLS) {
+           // Fallback to strict heuristic if attacker is spamming borderline payloads
+           isMalicious = true; 
+           finalLabel = "rate_limit_sqli_heuristic";
+        } else {
+          mlCallCount++;
+          try {
+            const mlRes = await fetch(mlEndpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ payload: str })
+            });
+            if (mlRes.ok) {
+              const mlData = await mlRes.json();
+              if (mlData.prediction && mlData.prediction !== 'benign') {
+                isMalicious = true;
+                finalLabel = mlData.prediction;
+              } else if (mlData.label && mlData.label !== 'benign') {
+                isMalicious = true;
+                finalLabel = mlData.label;
+              }
+            }
+          } catch (e) {
+             console.error("[SQLGuard] ML Bridge error:", e.message);
+          }
+        }
+      }
+
+      if (isMalicious) {
+        logAttack(ip, str, finalLabel);
+        return { isMalicious: true, label: finalLabel };
+      }
+      return false;
+    };
+
+    // BUG FIX 2: Add Depth Limit to prevent Stack Overflow DoS
+    const deepScan = async (obj, currentDepth = 0) => {
+      if (!obj || typeof obj !== 'object') return false;
+      if (currentDepth > 20) {
+         logAttack(ip, "[JSON Depth Exceeded]", "dos");
+         return { isMalicious: true, label: 'dos' };
+      }
+
+      for (const key of Object.keys(obj)) {
+        const keyAttack = await scanString(key);
+        if (keyAttack) return keyAttack;
+
+        const val = obj[key];
+        if (typeof val === 'string') {
+          const valAttack = await scanString(val);
+          if (valAttack) return valAttack;
+        } else if (typeof val === 'object' && val !== null) {
+          const nestedAttack = await deepScan(val, currentDepth + 1);
+          if (nestedAttack) return nestedAttack;
+        }
+      }
+      return false;
+    };
+
     for (const source of sources) {
       if (!source) continue;
-      const attack = await deepScan(source, ip);
+      const attack = await deepScan(source);
       if (attack) {
         return res.status(403).json({
           error: 'Forbidden',

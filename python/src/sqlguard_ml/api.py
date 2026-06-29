@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from .detector import PayloadDetector
 
 app = FastAPI(title="SQLGuard ML API")
 detector = PayloadDetector()
 
 class DetectRequest(BaseModel):
-    payload: str
+    payload: str = Field(..., max_length=50000)
 
 class DetectResponse(BaseModel):
     label: str
