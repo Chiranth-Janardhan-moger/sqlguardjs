@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "TensorFlow SQLi/XSS detector"
 dependencies = [
     "tensorflow",
+    "keras>=3.15.0",
     "numpy",
     "fastapi",
     "uvicorn",
