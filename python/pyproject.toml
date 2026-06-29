@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sqlguard_ml"
+version = "0.1.0"
+description = "TensorFlow SQLi/XSS detector"
+dependencies = [
+    "tensorflow",
+    "numpy",
+    "fastapi",
+    "uvicorn",
+    "scikit-learn"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[project.scripts]
+sqlguard = "sqlguard_ml.cli:main"

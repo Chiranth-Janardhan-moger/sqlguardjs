@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: sqlguard_ml
+Version: 0.1.0
+Summary: TensorFlow SQLi/XSS detector
+Requires-Dist: tensorflow
+Requires-Dist: numpy
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: scikit-learn
