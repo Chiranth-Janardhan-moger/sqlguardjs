@@ -50,44 +50,55 @@ function expressMiddleware(options = {}) {
     console.warn(`[SQLGuard] Attack Blocked: ${label} from IP: ${ip} | Payload: ${payload}`);
   };
 
+  const scanString = async (str, ip) => {
+    const result = detector.detect(str);
+    let finalLabel = result.label;
+    let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
+
+    if (!isMalicious && result.confidence >= 0.2 && mlEndpoint) {
+      try {
+        const mlRes = await fetch(mlEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: str })
+        });
+        if (mlRes.ok) {
+          const mlData = await mlRes.json();
+          if (mlData.prediction && mlData.prediction !== 'benign') {
+            isMalicious = true;
+            finalLabel = mlData.prediction;
+          } else if (mlData.label && mlData.label !== 'benign') {
+            isMalicious = true;
+            finalLabel = mlData.label;
+          }
+        }
+      } catch (e) {
+         console.error("[SQLGuard] ML Bridge error:", e.message);
+      }
+    }
+
+    if (isMalicious) {
+      logAttack(ip, str, finalLabel);
+      return { isMalicious: true, label: finalLabel };
+    }
+    return false;
+  };
+
   const deepScan = async (obj, ip) => {
     if (!obj || typeof obj !== 'object') return false;
     for (const key of Object.keys(obj)) {
+      // 1. Scan the key (crucial for NoSQLi like $where)
+      const keyAttack = await scanString(key, ip);
+      if (keyAttack) return keyAttack;
+
+      // 2. Scan the value
       const val = obj[key];
       if (typeof val === 'string') {
-        const result = detector.detect(val);
-        let finalLabel = result.label;
-        let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
-
-        if (!isMalicious && result.confidence >= 0.2 && mlEndpoint) {
-          try {
-            const mlRes = await fetch(mlEndpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ payload: val })
-            });
-            if (mlRes.ok) {
-              const mlData = await mlRes.json();
-              if (mlData.prediction && mlData.prediction !== 'benign') {
-                isMalicious = true;
-                finalLabel = mlData.prediction;
-              } else if (mlData.label && mlData.label !== 'benign') {
-                isMalicious = true;
-                finalLabel = mlData.label;
-              }
-            }
-          } catch (e) {
-             console.error("[SQLGuard] ML Bridge error:", e.message);
-          }
-        }
-
-        if (isMalicious) {
-          logAttack(ip, val, finalLabel);
-          return { isMalicious: true, label: finalLabel };
-        }
+        const valAttack = await scanString(val, ip);
+        if (valAttack) return valAttack;
       } else if (typeof val === 'object' && val !== null) {
-        const nestedResult = await deepScan(val, ip);
-        if (nestedResult) return nestedResult;
+        const nestedAttack = await deepScan(val, ip);
+        if (nestedAttack) return nestedAttack;
       }
     }
     return false;
