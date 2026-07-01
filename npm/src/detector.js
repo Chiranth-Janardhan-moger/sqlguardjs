@@ -78,9 +78,10 @@ function expressMiddleware(options = {}) {
   const mlEndpoint = options.mlEndpoint || null; 
   const rateLimiter = new IPRateLimiter(options.rateLimitWindowMs || 300000, options.maxRateLimitCapacity || 10000);
   const maxSuspiciousRequests = options.maxSuspiciousRequests || 3;
+  const logger = typeof options.logAttacks === 'function' ? options.logAttacks : (options.logAttacks ? console.warn : () => {});
 
   const logAttack = (ip, payload, label) => {
-    console.warn(`[SQLGuard] Attack Blocked: ${label} from IP: ${ip} | Payload: ${payload}`);
+    logger(`[SQLGuard] Attack Blocked: ${label} from IP: ${ip} | Payload: ${payload}`);
   };
 
   return async (req, res, next) => {
@@ -102,7 +103,7 @@ function expressMiddleware(options = {}) {
         if (suspiciousCount >= maxSuspiciousRequests) {
            isMalicious = true;
            finalLabel = "rate_limit_escalation";
-           console.warn(`[SQLGuard] IP ${ip} blocked due to repeated ambiguous probes.`);
+           logger(`[SQLGuard] IP ${ip} blocked due to repeated ambiguous probes.`);
         } else if (mlEndpoint) {
           if (mlCallCount >= MAX_ML_CALLS) {
              // Fallback to strict heuristic if attacker is spamming borderline payloads
@@ -124,7 +125,7 @@ function expressMiddleware(options = {}) {
                 }
               }
             } catch (e) {
-               console.error("[SQLGuard] ML Bridge error:", e.message);
+               logger(`[SQLGuard] ML Bridge error: ${e.message}`);
             }
           }
         }
