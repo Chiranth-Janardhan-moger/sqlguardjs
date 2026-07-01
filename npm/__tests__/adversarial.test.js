@@ -47,4 +47,12 @@ describe('Adversarial Bypasses', () => {
     await middleware(req, mockRes, mockNext);
     expect(mockRes.status).toHaveBeenCalledWith(403);
   });
+
+  it('should detect attribute injection without wrapping tag', async () => {
+    const req = {
+      query: { q: 'onmouseover="alert(1)' }
+    };
+    await middleware(req, mockRes, mockNext);
+    expect(mockRes.status).toHaveBeenCalledWith(403);
+  });
 });

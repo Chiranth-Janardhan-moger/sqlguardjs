@@ -15,6 +15,7 @@ class Detector {
     this.xssPatterns = [
       /<script\b/i,
       /<[^>]+(on\w+)\s*=/i,
+      /\bon\w+\s*=\s*["']?[^"'>]*(?:alert|document\.|window\.|eval|fetch)/i,
       /javascript:/i,
       /<(?:iframe|object|embed|applet)\b/i
     ];
