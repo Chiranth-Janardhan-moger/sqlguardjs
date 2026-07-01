@@ -7,6 +7,26 @@
 
 > **Hybrid SQL Injection (SQLi) and Cross-Site Scripting (XSS) detection engine.** Includes a Node.js heuristic scanner and an Express.js middleware that can bridge to a local Python FastAPI Machine Learning service.
 
+---
+
+## 🚀 Latest Release: v1.2.4 The Production-Ready Express WAF
+
+When I first started this project, the goal was simple: stop SQL Injection and XSS before it hits the database. Over the past few days, the project underwent a massive security audit and complete architectural overhaul to transition from an experimental package into a hardened, production-grade Web Application Firewall (WAF) for Express.js.
+
+If you are running a Node/Express backend and want plug-and-play protection against the most common payload attacks, SQLGuard-ML provides a strict heuristic engine out-of-the-box.
+
+### 🛡️ What's New?
+We've fundamentally rewritten the core engine to ensure it stands up to real-world, adversarial fuzzing. The heuristic layer is solid and now features:
+
+* **Recursive multi-layer decoder** (URL, double-URL, Base64, HTML entities, %uXXXX, null bytes)
+* **SQL inline comment stripping** before pattern matching
+* **IP-based rate escalation** for repeated ambiguous probes *(requires setting a custom threshold)*
+* **Header and raw Buffer body scanning**
+* **34 passing tests** including adversarial bypasses
+* **Zero false positives** on a 20+ benign payload benchmark
+
+We just locked our test suite at 34/34 passing adversarial bypass tests. We'd love for the community to try and break it!
+
 ## Quick Start (Node.js)
 
 Install the package via NPM:
