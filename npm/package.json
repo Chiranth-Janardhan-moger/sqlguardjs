@@ -1,6 +1,6 @@
 {
   "name": "sqlguard-ml",
-  "version": "1.2.4",
+  "version": "1.0.0",
   "description": "Heuristic detector for SQL injection and XSS",
   "main": "src/detector.js",
   "bin": {

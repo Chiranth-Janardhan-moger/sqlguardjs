@@ -9,7 +9,7 @@
 
 ---
 
-## 🚀 Latest Release: v1.2.4
+## 🚀 Latest Release: v1.0.0
 
 When I first started this project, the goal was simple: stop SQL Injection and XSS before it hits the database. Over the past few days, the project underwent intense iterative testing to catch and fix critical bypasses, moving it from a broken experimental package into a functional heuristic Web Application Firewall (WAF) for Express.js.
 
