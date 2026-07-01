@@ -29,6 +29,8 @@ The Node.js package (`npm`) operates using a fast heuristic (regex-based) scanne
 - **Hybrid AI Bridge**: Automatically queries a local Python Machine Learning engine for a second opinion on borderline payloads to reduce false positives (requires running the Python server).
 - **Deep Payload Decoding**: Unravels multi-layer URL encoding, Hex, and Base64 payloads before scanning to catch obfuscated attacks.
 - **Express.js Middleware**: Plug-and-play middleware that automatically scans `req.query`, `req.body`, and `req.headers`.
+- **Intelligent Header Scanning**: Deeply scans headers like `User-Agent`, `Referer`, and `X-Forwarded-For`, as well as raw text buffers to catch evasion attempts.
+- **IP Reputation & Rate Limiting**: Tracks IP behavior with a sliding window to escalate suspicion if an attacker spams multiple borderline/ambiguous payloads.
 - **ReDoS Protection**: Enforces strict payload length caps to prevent Regular Expression Denial of Service.
 - **Comment Stripping**: Removes SQL inline comments to prevent common obfuscation bypasses (e.g. `UN/**/ION`).
 
@@ -45,16 +47,18 @@ npm install sqlguard-ml
 
 ### Python (Machine Learning Detector)
 
-Currently, the `sqlguard-ml` Python package is **not published to PyPI**. You must build and install it locally from this repository if you wish to run the ML backend.
+Currently, the `sqlguard-ml` Python package provides a lightweight FastAPI stub model using Scikit-Learn for the Hybrid Bridge. You must build and install it locally from this repository.
 
 ```bash
 cd python
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
+python src/sqlguard_ml/train_stub.py
+uvicorn src.sqlguard_ml.api:app --reload
 ```
 
-*(Note: Ensure you are using Python 3.10+ for full TensorFlow compatibility).*
+*(Note: This provides the 'second opinion' endpoint that the Node.js middleware bridges to).*
 
 ---
 

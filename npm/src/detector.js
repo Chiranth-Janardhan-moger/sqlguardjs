@@ -1,3 +1,5 @@
+const { IPRateLimiter } = require('./rateLimiter');
+
 class Detector {
   constructor() {
     this.sqliPatterns = [
@@ -58,6 +60,8 @@ function expressMiddleware(options = {}) {
   const detector = new Detector();
   const threshold = options.threshold || 0.5;
   const mlEndpoint = options.mlEndpoint || null; 
+  const rateLimiter = new IPRateLimiter(options.rateLimitWindowMs || 300000, options.maxRateLimitCapacity || 10000);
+  const maxSuspiciousRequests = options.maxSuspiciousRequests || 3;
 
   const logAttack = (ip, payload, label) => {
     console.warn(`[SQLGuard] Attack Blocked: ${label} from IP: ${ip} | Payload: ${payload}`);
@@ -77,31 +81,38 @@ function expressMiddleware(options = {}) {
       let finalLabel = result.label;
       let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
 
-      if (!isMalicious && result.confidence >= 0.2 && mlEndpoint) {
-        if (mlCallCount >= MAX_ML_CALLS) {
-           // Fallback to strict heuristic if attacker is spamming borderline payloads
-           isMalicious = true; 
-           finalLabel = "rate_limit_sqli_heuristic";
-        } else {
-          mlCallCount++;
-          try {
-            const mlRes = await fetch(mlEndpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ payload: str })
-            });
-            if (mlRes.ok) {
-              const mlData = await mlRes.json();
-              if (mlData.prediction && mlData.prediction !== 'benign') {
-                isMalicious = true;
-                finalLabel = mlData.prediction;
-              } else if (mlData.label && mlData.label !== 'benign') {
-                isMalicious = true;
-                finalLabel = mlData.label;
+      if (!isMalicious && result.confidence >= 0.2) {
+        const suspiciousCount = rateLimiter.recordSuspicious(ip);
+        if (suspiciousCount >= maxSuspiciousRequests) {
+           isMalicious = true;
+           finalLabel = "rate_limit_escalation";
+           console.warn(`[SQLGuard] IP ${ip} blocked due to repeated ambiguous probes.`);
+        } else if (mlEndpoint) {
+          if (mlCallCount >= MAX_ML_CALLS) {
+             // Fallback to strict heuristic if attacker is spamming borderline payloads
+             isMalicious = true; 
+             finalLabel = "rate_limit_sqli_heuristic";
+          } else {
+            mlCallCount++;
+            try {
+              const mlRes = await fetch(mlEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ payload: str })
+              });
+              if (mlRes.ok) {
+                const mlData = await mlRes.json();
+                if (mlData.prediction && mlData.prediction !== 'benign') {
+                  isMalicious = true;
+                  finalLabel = mlData.prediction;
+                } else if (mlData.label && mlData.label !== 'benign') {
+                  isMalicious = true;
+                  finalLabel = mlData.label;
+                }
               }
+            } catch (e) {
+               console.error("[SQLGuard] ML Bridge error:", e.message);
             }
-          } catch (e) {
-             console.error("[SQLGuard] ML Bridge error:", e.message);
           }
         }
       }
@@ -129,6 +140,9 @@ function expressMiddleware(options = {}) {
         if (typeof val === 'string') {
           const valAttack = await scanString(val);
           if (valAttack) return valAttack;
+        } else if (Buffer.isBuffer(val)) {
+          const valAttack = await scanString(val.toString('utf8'));
+          if (valAttack) return valAttack;
         } else if (typeof val === 'object' && val !== null) {
           const nestedAttack = await deepScan(val, currentDepth + 1);
           if (nestedAttack) return nestedAttack;
@@ -139,7 +153,16 @@ function expressMiddleware(options = {}) {
 
     for (const source of sources) {
       if (!source) continue;
-      const attack = await deepScan(source);
+      
+      let attack = false;
+      if (Buffer.isBuffer(source)) {
+         attack = await scanString(source.toString('utf8'));
+      } else if (typeof source === 'string') {
+         attack = await scanString(source);
+      } else if (typeof source === 'object') {
+         attack = await deepScan(source);
+      }
+
       if (attack) {
         return res.status(403).json({
           error: 'Forbidden',

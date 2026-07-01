@@ -1,30 +1,59 @@
+import os
+import joblib
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from .detector import PayloadDetector
 
-app = FastAPI(title="SQLGuard ML API")
-detector = PayloadDetector()
+app = FastAPI(title="SQLGuard ML API (Stub)")
 
 class DetectRequest(BaseModel):
     payload: str = Field(..., max_length=50000)
 
 class DetectResponse(BaseModel):
     label: str
+    is_malicious: bool
     confidence: float
-    probabilities: list[float]
+
+# Global state for the model
+ml_model = None
+ml_vectorizer = None
 
 @app.on_event("startup")
 async def startup_event():
-    detector._load_artifacts()
+    global ml_model, ml_vectorizer
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_path, 'models', 'stub_model.pkl')
+    vec_path = os.path.join(base_path, 'models', 'stub_vectorizer.pkl')
+    
+    if os.path.exists(model_path) and os.path.exists(vec_path):
+        ml_model = joblib.load(model_path)
+        ml_vectorizer = joblib.load(vec_path)
+    else:
+        print("Warning: Stub models not found. Run train_stub.py first.")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "model_loaded": ml_model is not None}
 
 @app.post("/api/v1/detect", response_model=DetectResponse)
 async def detect(req: DetectRequest):
+    if not ml_model or not ml_vectorizer:
+        # Fallback if model not trained
+        return DetectResponse(label="benign", is_malicious=False, confidence=0.0)
+        
     try:
-        res = detector.predict(req.payload)
-        return DetectResponse(**res)
+        X = ml_vectorizer.transform([req.payload])
+        probs = ml_model.predict_proba(X)[0]
+        classes = ml_model.classes_
+        
+        max_prob = max(probs)
+        label = classes[list(probs).index(max_prob)]
+        
+        is_malicious = label != "benign"
+        
+        return DetectResponse(
+            label=label,
+            is_malicious=is_malicious,
+            confidence=float(max_prob)
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -6,4 +6,5 @@ Requires-Dist: tensorflow
 Requires-Dist: keras>=3.15.0
 Requires-Dist: numpy
 Requires-Dist: fastapi
+Requires-Dist: uvicorn
 Requires-Dist: scikit-learn

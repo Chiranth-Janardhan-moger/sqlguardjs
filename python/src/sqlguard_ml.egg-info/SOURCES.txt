@@ -4,6 +4,7 @@ src/sqlguard_ml/__init__.py
 src/sqlguard_ml/api.py
 src/sqlguard_ml/cli.py
 src/sqlguard_ml/detector.py
+src/sqlguard_ml/train_stub.py
 src/sqlguard_ml.egg-info/PKG-INFO
 src/sqlguard_ml.egg-info/SOURCES.txt
 src/sqlguard_ml.egg-info/dependency_links.txt
