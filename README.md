@@ -9,13 +9,13 @@
 
 ---
 
-## 🚀 Latest Release: v1.0.0
+##  Latest Release: v1.0.0
 
 When I first started this project, the goal was simple: stop SQL Injection and XSS before it hits the database. Over the past few days, the project underwent intense iterative testing to catch and fix critical bypasses, moving it from a broken experimental package into a functional heuristic Web Application Firewall (WAF) for Express.js.
 
 If you are running a Node/Express backend and want a plug-and-play heuristic engine to block common payload attacks, SQLGuard-ML now works end-to-end.
 
-### 🛡️ What it actually does
+### ️ What it actually does
 We've fundamentally rewritten the core engine to ensure it catches real attacks without blocking benign text. The heuristic layer features:
 
 * **Recursive multi-layer decoder** (URL, double-URL, Base64, HTML entities, %uXXXX, null bytes)
@@ -172,7 +172,7 @@ twine upload dist/*
 Contributions, issues, and feature requests are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
-Copyright © 2026. This project is [MIT](LICENSE) licensed.
+Copyright  2026. This project is [MIT](LICENSE) licensed.
 
 
 
