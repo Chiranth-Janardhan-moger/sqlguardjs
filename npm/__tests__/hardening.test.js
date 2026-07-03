@@ -103,6 +103,22 @@ describe('Security hardening regressions', () => {
     expect(result.confidence).toBeGreaterThanOrEqual(0.5);
   });
 
+  it('keeps long pathological-looking inputs within a broad timing budget', () => {
+    const samples = [
+      'a'.repeat(50000),
+      "'".repeat(2000) + ' OR ' + '1='.repeat(2000),
+      '<'.repeat(20000) + 'script'.repeat(1000),
+      'data:image/svg+xml;base64,' + 'A'.repeat(50000)
+    ];
+    const startedAt = Date.now();
+
+    for (const sample of samples) {
+      expect(() => detector.detect(sample)).not.toThrow();
+    }
+
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+  });
+
   it('detects bare destructive DDL without requiring a semicolon', () => {
     const result = detector.detect('DROP TABLE users');
 

@@ -59,6 +59,33 @@ describe('Express integration', () => {
       });
   });
 
+  it('secureRouter applies route guards to all() routes', async () => {
+    const app = express();
+    const router = secureRouter();
+
+    router.all('/all/:id', (req, res) => res.json({ ok: true }));
+    app.use(router);
+
+    await request(app)
+      .post('/all/1%20UNION%20SELECT%20password%20FROM%20users')
+      .expect(403)
+      .expect(res => {
+        expect(res.body.details.label).toBe('sqli');
+      });
+  });
+
+  it('secureRouter applies route guards to head() routes', async () => {
+    const app = express();
+    const router = secureRouter();
+
+    router.head('/head/:id', (req, res) => res.status(204).end());
+    app.use(router);
+
+    await request(app)
+      .head('/head/1%20UNION%20SELECT%20password%20FROM%20users')
+      .expect(403);
+  });
+
   it('secureRouter does not mistake decorated handler functions for route options', async () => {
     const app = express();
     const router = secureRouter();
