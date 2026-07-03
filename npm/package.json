@@ -1,5 +1,5 @@
 {
-  "name": "sqlguard",
+  "name": "@chiranthmoger/sqlguard",
   "version": "1.0.0",
   "description": "Express middleware and CLI scanner for SQL injection, NoSQL injection, and XSS payloads",
   "main": "src/detector.js",

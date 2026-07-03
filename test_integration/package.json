@@ -12,6 +12,6 @@
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1",
-    "sqlguard": "file:../npm"
+    "@chiranthmoger/sqlguard": "file:../npm"
   }
 }

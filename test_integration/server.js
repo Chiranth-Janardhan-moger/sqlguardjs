@@ -1,5 +1,5 @@
 const express = require('express');
-const { expressMiddleware } = require('sqlguard');
+const { expressMiddleware } = require('@chiranthmoger/sqlguard');
 
 const app = express();
 app.use(express.json());

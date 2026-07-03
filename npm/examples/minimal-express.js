@@ -1,5 +1,5 @@
 const express = require('express');
-const { sqlguard } = require('sqlguard');
+const { sqlguard } = require('@chiranthmoger/sqlguard');
 
 const app = express();
 const guard = sqlguard({
