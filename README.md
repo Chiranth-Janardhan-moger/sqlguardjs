@@ -1,5 +1,11 @@
 # SQLGuard ML
 
+[![npm version](https://img.shields.io/npm/v/sqlguard-ml.svg)](https://www.npmjs.com/package/sqlguard-ml)
+[![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/actions/workflows/ci.yml)
+[![Node.js >=18](https://img.shields.io/badge/node-%3E%3D18.0.0-339933.svg)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/npm/l/sqlguard-ml.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/blob/main/LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sqlguard-ml.svg)](https://www.npmjs.com/package/sqlguard-ml)
+
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
 SQLGuard ML is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides a fast heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, and an optional HTTP bridge for a second-opinion model.
