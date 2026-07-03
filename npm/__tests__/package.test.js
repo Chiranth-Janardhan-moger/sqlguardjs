@@ -1,4 +1,6 @@
 const pkg = require('../package.json');
+const { execFileSync } = require('child_process');
+const path = require('path');
 
 describe('package metadata', () => {
   it('should declare the runtime actually required by the CLI and middleware', () => {
@@ -19,5 +21,13 @@ describe('package metadata', () => {
     expect(pkg.types).toBe('index.d.ts');
     expect(pkg.peerDependencies.express).toBe('>=4.18.0 || >=5.0.0');
     expect(pkg.peerDependenciesMeta.express.optional).toBe(true);
+  });
+
+  it.each([
+    'minimal-express.js',
+    'production-express.js'
+  ])('should keep example syntax valid: %s', fileName => {
+    const examplePath = path.join(__dirname, '..', 'examples', fileName);
+    expect(() => execFileSync(process.execPath, ['-c', examplePath], { encoding: 'utf8' })).not.toThrow();
   });
 });

@@ -18,6 +18,21 @@ describe('CLI scanner', () => {
     expect(parsed.result.confidence).toBeGreaterThanOrEqual(0.5);
   });
 
+  it.each([
+    ['MySQL versioned comment SQLi', 'id=-1/*!50000UNION SELECT username,password FROM users*/', 'sqli'],
+    ['SVG data URI XSS', 'data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+PC9zdmc+', 'xss']
+  ])('detects %s through the CLI', (_name, payload, label) => {
+    const output = execFileSync(process.execPath, [
+      cliPath,
+      'scan',
+      payload
+    ], { encoding: 'utf8' });
+    const parsed = JSON.parse(output);
+
+    expect(parsed.result.label).toBe(label);
+    expect(parsed.result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
   it('scans payload files and emits CSV', () => {
     const filePath = path.join(os.tmpdir(), `sqlguardjs-cli-${process.pid}.txt`);
     fs.writeFileSync(filePath, [

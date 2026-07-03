@@ -182,6 +182,7 @@ app.use('/api', router);
 ## Production Rollout
 
 Start with `dryRun: true` on real traffic. This records detections without blocking requests.
+In dry-run mode SQLGuardJS continues scanning the whole request after the first detection. The first detection is available as `req.sqlguardjs`, and all detections for the request are available as `req.sqlguardjsDetections`.
 
 If your app is behind nginx, Cloudflare, a load balancer, or a platform proxy, configure Express `trust proxy` before relying on IP-based suspicious-request escalation. For authenticated APIs, prefer a stable application identity with `rateLimitKey`, such as user ID plus IP.
 
@@ -341,7 +342,7 @@ Example result:
 | `maxSuspiciousRequests` | `3` | Suspicious requests per `rateLimitKey` before escalation blocks. |
 | `maxRateLimitCapacity` | `10000` | Maximum IP entries stored in the in-memory limiter. |
 | `rateLimitKey` | `req.ip` | Function `(req) => string`; choose the identity used for suspicious-request escalation. Configure Express `trust proxy` before relying on `req.ip` behind proxies. |
-| `dryRun` | `false` | Records detections and calls `next()` instead of blocking. |
+| `dryRun` | `false` | Records detections across the full request and calls `next()` instead of blocking. |
 | `logAttacks` | `false` | `true` logs to `console.warn`; a function receives the formatted log message. |
 | `logFormat` | `text` | Use `json` to send structured events to `logAttacks`; recommended for production log pipelines. |
 | `onThreat` | `undefined` | Callback receiving `(event, req)` for detections. |
@@ -360,6 +361,7 @@ Example result:
 | `maxDepth` | `20` | Maximum object nesting depth before the request is treated as a DoS probe. |
 | `maxFields` | `1000` | Maximum object fields scanned per request before the request is treated as a DoS probe. |
 | `maxPayloadLength` | `50000` | Maximum characters decoded and scanned per string. |
+| `maxDecodeIterations` | `8` | Maximum repeated URL/entity normalization passes for nested encoded payloads. |
 | `detector` | new `Detector()` | Optional preconfigured detector instance. |
 
 ## Blocked Response
@@ -417,7 +419,7 @@ Current result:
 
 ```text
 Test Suites: 9 passed, 9 total
-Tests: 63 passed, 63 total
+Tests: 82 passed, 82 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

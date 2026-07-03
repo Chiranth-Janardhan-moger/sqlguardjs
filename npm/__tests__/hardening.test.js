@@ -81,6 +81,28 @@ describe('Security hardening regressions', () => {
     ]));
   });
 
+  it('detects payloads through deeper nested URL encoding', () => {
+    const encoded = Array.from({ length: 6 }).reduce(
+      value => encodeURIComponent(value),
+      '<script>alert(1)</script>'
+    );
+    const result = detector.detect(encoded);
+
+    expect(result.label).toBe('xss');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it.each([
+    ['fullwidth SQL keywords', 'ＵＮＩＯＮ　ＳＥＬＥＣＴ password FROM users', 'sqli'],
+    ['fullwidth script tag', '＜script＞alert(1)＜/script＞', 'xss'],
+    ['HTML entity encoded event handler', '&#x3c;img src=x onerror=alert(1)&#x3e;', 'xss']
+  ])('normalizes %s', (_name, payload, label) => {
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe(label);
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
   it('detects bare destructive DDL without requiring a semicolon', () => {
     const result = detector.detect('DROP TABLE users');
 
@@ -139,6 +161,104 @@ describe('Express middleware hardening options', () => {
       label: 'sqli'
     }));
     expect(onThreat).toHaveBeenCalledWith(req.sqlguardjs, req);
+  });
+
+  it('continues scanning all sources in dryRun mode after the first detection', async () => {
+    const onThreat = jest.fn();
+    const middleware = expressMiddleware({ dryRun: true, onThreat });
+    const req = {
+      query: { a: "1' OR '1'='1" },
+      body: { comment: '<script>alert(1)</script>' },
+      cookies: { next: 'javascript:alert(1)' }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.sqlguardjsDetections).toHaveLength(3);
+    expect(req.sqlguardjsDetections.map(event => event.path)).toEqual(expect.arrayContaining([
+      'query.a',
+      'body.comment',
+      'cookies.next'
+    ]));
+    expect(onThreat).toHaveBeenCalledTimes(3);
+  });
+
+  it('continues scanning request signals after a dryRun schema violation', async () => {
+    const onThreat = jest.fn();
+    const middleware = expressMiddleware({
+      dryRun: true,
+      onThreat,
+      schema: {
+        body: {
+          required: ['username', 'password']
+        }
+      }
+    });
+    const req = {
+      body: {
+        username: 'a',
+        password: 'b',
+        isAdmin: true,
+        bio: '<script>alert(1)</script>'
+      }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.sqlguardjsDetections.map(event => event.label)).toEqual(expect.arrayContaining([
+      'schema_violation',
+      'xss'
+    ]));
+    expect(onThreat).toHaveBeenCalledTimes(2);
+  });
+
+  it('records multiple suspicious learning candidates in one dryRun request', async () => {
+    const learningEvents = [];
+    const middleware = expressMiddleware({
+      dryRun: true,
+      threshold: 0.9,
+      maxSuspiciousRequests: 999,
+      learning: true,
+      onLearningEvent: event => learningEvents.push(event)
+    });
+    const req = {
+      query: { next: 'javascript:' },
+      body: { link: 'javascript:' }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(learningEvents.map(event => event.path)).toEqual(expect.arrayContaining([
+      'query.next',
+      'body.link'
+    ]));
+  });
+
+  it('scans prototype-pollution-shaped keys without mutating object prototypes', async () => {
+    const middleware = expressMiddleware();
+    const req = {
+      body: JSON.parse('{"__proto__":"<script>alert(1)</script>","constructor":{"prototype":{"polluted":"UNION SELECT password FROM users"}}}')
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect({}.polluted).toBeUndefined();
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('escapes newlines in text logs and request IDs', async () => {

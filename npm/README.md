@@ -111,6 +111,8 @@ app.use(guard.global({
 Sensitive fields such as passwords and tokens are redacted in payload previews by default.
 Use `logFormat: 'json'` for production log ingestion. Text logs escape carriage returns and newlines, but structured logs are safer for line-oriented parsers.
 
+In `dryRun` mode, SQLGuardJS scans the full request instead of stopping at the first detection. The first detection is stored on `req.sqlguardjs`; all detections are stored on `req.sqlguardjsDetections`.
+
 ## Safe Learning Mode
 
 ```javascript

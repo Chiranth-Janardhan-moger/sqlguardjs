@@ -109,6 +109,7 @@ export interface ExpressMiddlewareOptions {
   maxDepth?: number;
   maxFields?: number;
   maxPayloadLength?: number;
+  maxDecodeIterations?: number;
   maxLogPayloadLength?: number;
   redactKeys?: string[];
   getRequestId?: (req: any) => string | null;
@@ -126,7 +127,7 @@ export interface SecureRouterOptions extends ExpressMiddlewareOptions {
 export type RequestHandler = (req: any, res: any, next: any) => any;
 
 export class Detector {
-  constructor(options?: { maxPayloadLength?: number });
+  constructor(options?: { maxPayloadLength?: number; maxDecodeIterations?: number });
   decodeDeeply(payload: unknown): string;
   normalizePayload(payload: unknown, options?: { sqlCommentMode?: 'space' | 'remove' | 'preserve' }): string;
   payloadVariants(payload: unknown): string[];

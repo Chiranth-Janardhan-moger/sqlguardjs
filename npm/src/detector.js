@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const DEFAULT_THRESHOLD = 0.5;
 const DEFAULT_SUSPICIOUS_THRESHOLD = 0.2;
 const DEFAULT_MAX_PAYLOAD_LENGTH = 50000;
+const DEFAULT_MAX_DECODE_ITERATIONS = 8;
 const DEFAULT_MAX_DEPTH = 20;
 const DEFAULT_MAX_FIELDS = 1000;
 const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*)';
@@ -235,6 +236,7 @@ function validateSchema(req, schema) {
 class Detector {
   constructor(options = {}) {
     this.maxPayloadLength = options.maxPayloadLength || DEFAULT_MAX_PAYLOAD_LENGTH;
+    this.maxDecodeIterations = options.maxDecodeIterations ?? DEFAULT_MAX_DECODE_ITERATIONS;
     this.sqliSignals = [
       {
         id: 'union-select',
@@ -417,7 +419,7 @@ class Detector {
     let decoded = normalize(payload);
     let previous = "";
     let iterations = 0;
-    while (decoded !== previous && iterations < 5) {
+    while (decoded !== previous && iterations < this.maxDecodeIterations) {
       previous = decoded;
       try { decoded = normalize(decodeURIComponent(decoded)); } catch (e) { decoded = normalize(decoded); }
       iterations++;
@@ -496,7 +498,10 @@ class Detector {
 }
 
 function expressMiddleware(options = {}) {
-  const detector = options.detector || new Detector({ maxPayloadLength: options.maxPayloadLength });
+  const detector = options.detector || new Detector({
+    maxPayloadLength: options.maxPayloadLength,
+    maxDecodeIterations: options.maxDecodeIterations
+  });
   const threshold = options.threshold ?? DEFAULT_THRESHOLD;
   const suspiciousThreshold = options.suspiciousThreshold ?? DEFAULT_SUSPICIOUS_THRESHOLD;
   const rateLimiter = new IPRateLimiter(options.rateLimitWindowMs || 300000, options.maxRateLimitCapacity || 10000);
@@ -560,7 +565,9 @@ function expressMiddleware(options = {}) {
 
     const reportDetection = (payload, detection) => {
       const event = createDetectionEvent(req, payload, detection, eventOptions);
-      req.sqlguardjs = event;
+      req.sqlguardjsDetections = req.sqlguardjsDetections || [];
+      req.sqlguardjsDetections.push(event);
+      req.sqlguardjs = req.sqlguardjs || event;
       if (onThreat) onThreat(event, req);
       writeLog(event);
       return { isMalicious: true, label: detection.label };
@@ -621,6 +628,7 @@ function expressMiddleware(options = {}) {
       }
       if (seen.has(obj)) return false;
       seen.add(obj);
+      let attackFound = false;
 
       for (const [key, val] of Object.entries(obj)) {
         scannedFields++;
@@ -630,27 +638,38 @@ function expressMiddleware(options = {}) {
 
         const childPath = Array.isArray(obj) ? `${path}[${key}]` : `${path}.${key}`;
         const keyAttack = scanKeys ? await scanString(key, `${childPath}.__key`) : false;
-        if (keyAttack) return keyAttack;
+        if (keyAttack) {
+          if (!dryRun) return keyAttack;
+          attackFound = attackFound || keyAttack;
+        }
 
         if (typeof val === 'string') {
           const valAttack = await scanString(val, childPath);
-          if (valAttack) return valAttack;
+          if (valAttack) {
+            if (!dryRun) return valAttack;
+            attackFound = attackFound || valAttack;
+          }
         } else if (Buffer.isBuffer(val)) {
           const valAttack = await scanString(val.toString('utf8'), childPath);
-          if (valAttack) return valAttack;
+          if (valAttack) {
+            if (!dryRun) return valAttack;
+            attackFound = attackFound || valAttack;
+          }
         } else if (typeof val === 'object' && val !== null) {
           const nestedAttack = await deepScan(val, childPath, currentDepth + 1, seen);
-          if (nestedAttack) return nestedAttack;
+          if (nestedAttack) {
+            if (!dryRun) return nestedAttack;
+            attackFound = attackFound || nestedAttack;
+          }
         }
       }
-      return false;
+      return attackFound;
     };
 
     const schemaResult = validateSchema(req, resolveSchema(req, options));
     if (schemaResult) {
       const attack = reportDetection(schemaResult.payload, schemaResult.detection);
-      if (dryRun) return next();
-      return res.status(blockStatus).json({
+      if (!dryRun) return res.status(blockStatus).json({
         error: 'Forbidden',
         message: 'Malicious payload detected by SQLGuardJS',
         details: { label: attack.label }
@@ -670,8 +689,7 @@ function expressMiddleware(options = {}) {
       }
 
       if (attack) {
-        if (dryRun) return next();
-        return res.status(blockStatus).json({
+        if (!dryRun) return res.status(blockStatus).json({
           error: 'Forbidden',
           message: 'Malicious payload detected by SQLGuardJS',
           details: { label: attack.label }
@@ -689,7 +707,10 @@ function mergeOptions(base, override) {
 function sqlguardjs(options = {}) {
   const baseOptions = {
     ...options,
-    detector: options.detector || new Detector({ maxPayloadLength: options.maxPayloadLength })
+    detector: options.detector || new Detector({
+      maxPayloadLength: options.maxPayloadLength,
+      maxDecodeIterations: options.maxDecodeIterations
+    })
   };
 
   return {

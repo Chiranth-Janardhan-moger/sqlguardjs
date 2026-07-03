@@ -39,6 +39,55 @@ describe('Express integration', () => {
       .expect(403);
   });
 
+  it.each(['put', 'patch', 'delete', 'options'])('secureRouter applies route guards to %s routes', async method => {
+    const app = express();
+    const router = secureRouter();
+
+    router[method]('/items/:id', {
+      schema: {
+        params: {
+          required: ['id']
+        }
+      }
+    }, (req, res) => res.json({ ok: true }));
+    app.use(router);
+
+    await request(app)[method]('/items/1%20UNION%20SELECT%20password%20FROM%20users')
+      .expect(403)
+      .expect(res => {
+        expect(res.body.details.label).toBe('sqli');
+      });
+  });
+
+  it('secureRouter does not mistake decorated handler functions for route options', async () => {
+    const app = express();
+    const router = secureRouter();
+    const handler = (req, res) => res.json({ ok: true });
+    handler.required = ['not', 'route', 'options'];
+
+    router.get('/decorated/:id', handler);
+    app.use(router);
+
+    await request(app)
+      .get('/decorated/123')
+      .expect(200)
+      .expect(res => {
+        expect(res.body.ok).toBe(true);
+      });
+  });
+
+  it('handles attacker-controlled array-valued headers in integration', async () => {
+    const app = express();
+
+    app.use(expressMiddleware());
+    app.get('/headers', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .get('/headers')
+      .set('x-forwarded-for', ['127.0.0.1', '<script>alert(1)</script>'])
+      .expect(403);
+  });
+
   it('enforces route schemas for unexpected fields', async () => {
     const app = express();
     const router = secureRouter();

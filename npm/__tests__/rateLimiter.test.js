@@ -99,6 +99,32 @@ describe('Rate Limiter Middleware Integration', () => {
     }));
   });
 
+  it('should not leak suspicious counts across concurrent requests with different keys', async () => {
+    const middleware = expressMiddleware({
+      maxSuspiciousRequests: 2,
+      threshold: 0.6,
+      rateLimitKey: req => req.headers['x-user-id']
+    });
+    const responses = Array.from({ length: 3 }, () => ({
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn()
+    }));
+    const nexts = Array.from({ length: 3 }, () => jest.fn());
+    const requests = ['user-a', 'user-b', 'user-c'].map(userId => ({
+      headers: { 'x-user-id': userId },
+      query: { q: 'javascript:' }
+    }));
+
+    await Promise.all(requests.map((req, index) => middleware(req, responses[index], nexts[index])));
+
+    for (const res of responses) {
+      expect(res.status).not.toHaveBeenCalled();
+    }
+    for (const next of nexts) {
+      expect(next).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it('should not make external calls for suspicious payloads', async () => {
     const realFetch = global.fetch;
     const mockFetch = jest.fn();
