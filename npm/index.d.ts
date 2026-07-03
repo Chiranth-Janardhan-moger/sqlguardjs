@@ -4,7 +4,6 @@ export type ThreatLabel =
   | 'xss'
   | 'schema_violation'
   | 'rate_limit_escalation'
-  | 'rate_limit_sqli_heuristic'
   | 'dos'
   | string;
 
@@ -88,8 +87,6 @@ export interface LearningOptions {
 export interface ExpressMiddlewareOptions {
   threshold?: number;
   suspiciousThreshold?: number;
-  mlEndpoint?: string | null;
-  maxMlCalls?: number;
   rateLimitWindowMs?: number;
   maxSuspiciousRequests?: number;
   maxRateLimitCapacity?: number;

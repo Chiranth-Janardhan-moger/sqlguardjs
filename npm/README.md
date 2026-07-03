@@ -1,24 +1,24 @@
-# SQLGuard ML for Node.js
+# SQLGuard for Node.js
 
-[![npm version](https://img.shields.io/npm/v/sqlguard-ml.svg)](https://www.npmjs.com/package/sqlguard-ml)
-[![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/sqlguard.svg)](https://www.npmjs.com/package/sqlguard)
+[![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard/actions/workflows/ci.yml)
 [![Node.js >=18](https://img.shields.io/badge/node-%3E%3D18.0.0-339933.svg)](https://nodejs.org/)
-[![License: MIT](https://img.shields.io/npm/l/sqlguard-ml.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/blob/main/LICENSE)
-[![npm downloads](https://img.shields.io/npm/dm/sqlguard-ml.svg)](https://www.npmjs.com/package/sqlguard-ml)
+[![License: MIT](https://img.shields.io/npm/l/sqlguard.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard/blob/main/LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sqlguard.svg)](https://www.npmjs.com/package/sqlguard)
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
-SQLGuard ML is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads.
+SQLGuard is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads. It runs in-process and does not call a database or external service.
 
 ## 30-Second Quick Start
 
 ```bash
-npm install sqlguard-ml
+npm install sqlguard
 ```
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('sqlguard-ml');
+const { sqlguard } = require('sqlguard');
 
 const app = express();
 const guard = sqlguard();
@@ -41,16 +41,16 @@ curl "http://localhost:3000/login?id=1%20UNION%20SELECT%20password%20FROM%20user
 
 ## Before and After
 
-Without SQLGuard ML:
+Without SQLGuard:
 
 ```text
 Attacker -> Express route -> Application logic -> Database or HTML rendering
 ```
 
-With SQLGuard ML:
+With SQLGuard:
 
 ```text
-Attacker -> SQLGuard ML -> Blocked with 403 if malicious, otherwise passed to the Express route.
+Attacker -> SQLGuard -> Blocked with 403 if malicious, otherwise passed to the Express route.
 ```
 
 ## Why `global()` and `route()` both exist
@@ -62,14 +62,14 @@ Express does not populate `req.params` until after a route is matched.
 
 ## Performance
 
-SQLGuard ML scans decoded request data in memory and avoids network calls unless you configure `mlEndpoint`. In heuristic mode, it does not call a database or external service. Actual latency depends on payload size, nesting depth, logging, schema checks, and external ML calls.
+SQLGuard scans decoded request data in memory. Actual latency depends on payload size, nesting depth, logging, and schema checks.
 
-## Secure router
+## Secure Router
 
 Use `secureRouter()` when you want the router to handle both global request scanning and route-level parameter/schema checks automatically.
 
 ```javascript
-const { secureRouter } = require('sqlguard-ml');
+const { secureRouter } = require('sqlguard');
 
 const router = secureRouter({
   logFormat: 'json',
@@ -89,7 +89,7 @@ router.post('/login', {
 });
 ```
 
-## Admin logs
+## Admin Logs
 
 Admins can see detections by enabling `logAttacks` or `onThreat`. In production, send these events to your normal logger, cloud logs, SIEM, database, or alerting system.
 
@@ -105,7 +105,7 @@ app.use(guard.global({
 
 Sensitive fields such as passwords and tokens are redacted in payload previews by default.
 
-## Safe learning mode
+## Safe Learning Mode
 
 ```javascript
 app.use(guard.global({
@@ -122,8 +122,8 @@ Learning mode records suspicious allowed payloads for human review. It does not 
 ## CLI
 
 ```bash
-sqlguard-ml scan "1 UNION/**/SELECT password FROM users--"
-sqlguard-ml scan-file payloads.txt --format csv
+sqlguard scan "1 UNION/**/SELECT password FROM users--"
+sqlguard scan-file payloads.txt --format csv
 ```
 
 This package is defense in depth. Keep using parameterized queries, safe ORM APIs, context-aware output encoding, HTML sanitization, CSP, and least-privilege database accounts.

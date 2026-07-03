@@ -1,11 +1,11 @@
 {
-  "name": "sqlguard-ml",
-  "version": "1.0.2",
+  "name": "sqlguard",
+  "version": "1.0.0",
   "description": "Express middleware and CLI scanner for SQL injection, NoSQL injection, and XSS payloads",
   "main": "src/detector.js",
   "types": "index.d.ts",
   "bin": {
-    "sqlguard-ml": "bin/sqlguard-ml.js"
+    "sqlguard": "bin/sqlguard.js"
   },
   "keywords": [
     "security",
@@ -18,12 +18,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Chiranth-Janardhan-moger/sqlguard-ml.git"
+    "url": "git+https://github.com/Chiranth-Janardhan-moger/sqlguard.git"
   },
   "bugs": {
-    "url": "https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/issues"
+    "url": "https://github.com/Chiranth-Janardhan-moger/sqlguard/issues"
   },
-  "homepage": "https://github.com/Chiranth-Janardhan-moger/sqlguard-ml#readme",
+  "homepage": "https://github.com/Chiranth-Janardhan-moger/sqlguard#readme",
   "license": "MIT",
   "files": [
     "bin",

@@ -6,7 +6,6 @@ const DEFAULT_SUSPICIOUS_THRESHOLD = 0.2;
 const DEFAULT_MAX_PAYLOAD_LENGTH = 50000;
 const DEFAULT_MAX_DEPTH = 20;
 const DEFAULT_MAX_FIELDS = 1000;
-const DEFAULT_MAX_ML_CALLS = 10;
 const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*)';
 const HTTP_METHODS = ['all', 'get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
 const DEFAULT_REDACT_KEYS = ['password', 'passwd', 'pwd', 'token', 'secret', 'authorization', 'cookie', 'api_key', 'apikey'];
@@ -447,12 +446,10 @@ function expressMiddleware(options = {}) {
   const detector = options.detector || new Detector({ maxPayloadLength: options.maxPayloadLength });
   const threshold = options.threshold ?? DEFAULT_THRESHOLD;
   const suspiciousThreshold = options.suspiciousThreshold ?? DEFAULT_SUSPICIOUS_THRESHOLD;
-  const mlEndpoint = options.mlEndpoint || null; 
   const rateLimiter = new IPRateLimiter(options.rateLimitWindowMs || 300000, options.maxRateLimitCapacity || 10000);
   const maxSuspiciousRequests = options.maxSuspiciousRequests || 3;
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
   const maxFields = options.maxFields ?? DEFAULT_MAX_FIELDS;
-  const maxMlCalls = options.maxMlCalls ?? DEFAULT_MAX_ML_CALLS;
   const blockStatus = options.blockStatus ?? 403;
   const dryRun = options.dryRun === true;
   const scanQuery = options.scanQuery !== false;
@@ -503,7 +500,6 @@ function expressMiddleware(options = {}) {
     if (scanParams) sources.push(['params', req.params]);
     if (scanCookies) sources.push(['cookies', req.cookies]);
     
-    let mlCallCount = 0;
     let scannedFields = 0;
 
     const reportDetection = (payload, detection) => {
@@ -548,34 +544,6 @@ function expressMiddleware(options = {}) {
              payloadLength: String(str).length,
              reason: 'repeated_suspicious_probe'
            }, logFormat));
-        } else if (mlEndpoint) {
-          if (mlCallCount >= maxMlCalls) {
-             // Fallback to strict heuristic if attacker is spamming borderline payloads
-             isMalicious = true; 
-             finalLabel = "rate_limit_sqli_heuristic";
-             finalConfidence = threshold;
-          } else {
-            mlCallCount++;
-            try {
-              const mlRes = await fetch(mlEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ payload: str })
-              });
-              if (mlRes.ok) {
-                const mlData = await mlRes.json();
-                if ((mlData.label && mlData.label !== 'benign') || mlData.isMalicious === true) {
-                  isMalicious = true;
-                  finalLabel = mlData.label || 'ml_detected';
-                  finalConfidence = Math.max(finalConfidence, mlData.confidence || threshold);
-                }
-              }
-            } catch (e) {
-               if (logger) logger(logFormat === 'json'
-                 ? { type: 'sqlguard.ml_error', timestamp: new Date().toISOString(), message: e.message, requestId: eventOptions.getRequestId(req) }
-                 : `[SQLGuard] ML Bridge error: ${e.message}`);
-            }
-          }
         }
       }
 
@@ -628,7 +596,7 @@ function expressMiddleware(options = {}) {
       if (dryRun) return next();
       return res.status(blockStatus).json({
         error: 'Forbidden',
-        message: 'Malicious payload detected by SQLGuard ML',
+        message: 'Malicious payload detected by SQLGuard',
         details: { label: attack.label }
       });
     }
@@ -649,7 +617,7 @@ function expressMiddleware(options = {}) {
         if (dryRun) return next();
         return res.status(blockStatus).json({
           error: 'Forbidden',
-          message: 'Malicious payload detected by SQLGuard ML',
+          message: 'Malicious payload detected by SQLGuard',
           details: { label: attack.label }
         });
       }

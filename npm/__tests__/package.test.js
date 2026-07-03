@@ -1,8 +1,14 @@
 const pkg = require('../package.json');
 
 describe('package metadata', () => {
-  it('should declare the runtime actually required by the CLI and ML bridge', () => {
+  it('should declare the runtime actually required by the CLI and middleware', () => {
     expect(pkg.engines.node).toBe('>=18.0.0');
+  });
+
+  it('should publish under the clean sqlguard package name', () => {
+    expect(pkg.name).toBe('sqlguard');
+    expect(pkg.version).toBe('1.0.0');
+    expect(pkg.bin.sqlguard).toBe('bin/sqlguard.js');
   });
 
   it('should publish runtime files only', () => {

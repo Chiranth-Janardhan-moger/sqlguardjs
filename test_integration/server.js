@@ -1,12 +1,11 @@
 const express = require('express');
-const { expressMiddleware } = require('sqlguard-ml');
+const { expressMiddleware } = require('sqlguard');
 
 const app = express();
 app.use(express.json());
 
 app.use(expressMiddleware({
-  threshold: 0.5,
-  mlEndpoint: 'http://127.0.0.1:8000/api/v1/detect'
+  threshold: 0.5
 }));
 
 app.post('/login', (req, res) => {

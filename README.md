@@ -1,28 +1,30 @@
-# SQLGuard ML
+# SQLGuard
 
-[![npm version](https://img.shields.io/npm/v/sqlguard-ml.svg)](https://www.npmjs.com/package/sqlguard-ml)
-[![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/sqlguard.svg)](https://www.npmjs.com/package/sqlguard)
+[![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard/actions/workflows/ci.yml)
 [![Node.js >=18](https://img.shields.io/badge/node-%3E%3D18.0.0-339933.svg)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/npm/l/sqlguard.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard/blob/main/LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sqlguard.svg)](https://www.npmjs.com/package/sqlguard)
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
-SQLGuard ML is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides an in-process heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, and an optional HTTP bridge for a second-opinion model.
+SQLGuard is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides an in-process heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, safe learning events, and request-size safety limits.
 
-SQLGuard ML is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
+SQLGuard is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
 
 ## 30-Second Quick Start
 
 Install:
 
 ```bash
-npm install sqlguard-ml
+npm install sqlguard
 ```
 
 Use:
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('sqlguard-ml');
+const { sqlguard } = require('sqlguard');
 
 const app = express();
 const guard = sqlguard();
@@ -59,7 +61,7 @@ app.post('/login', guard.route({
 
 ## Before and After
 
-Without SQLGuard ML:
+Without SQLGuard:
 
 ```text
 Attacker
@@ -68,17 +70,17 @@ Attacker
   -> Database or HTML rendering
 ```
 
-With SQLGuard ML:
+With SQLGuard:
 
 ```text
 Attacker
-  -> SQLGuard ML
+  -> SQLGuard
   -> Blocked with 403 if malicious, otherwise passed to the Express route.
 ```
 
 ## Why `global()` and `route()` both exist
 
-Express does not populate `req.params` until after a route is matched. SQLGuard ML therefore provides two guard points:
+Express does not populate `req.params` until after a route is matched. SQLGuard therefore provides two guard points:
 
 - `guard.global()` scans request bodies, query strings, headers, and cookies before route handlers run.
 - `guard.route()` scans `req.params` and applies optional route schemas after Express resolves the route.
@@ -87,9 +89,9 @@ Use both when you want all common request inputs inspected before your route log
 
 ## Performance
 
-SQLGuard ML scans decoded request data in memory and avoids network calls unless you explicitly configure `mlEndpoint`. In heuristic mode, it does not call a database or external service. Actual latency depends on payload size, nesting depth, enabled logging, schema checks, and whether you call an external ML service.
+SQLGuard scans decoded request data in memory. It does not call a database or external service. Actual latency depends on payload size, nesting depth, enabled logging, and schema checks.
 
-Default limits such as `maxPayloadLength`, `maxDepth`, `maxFields`, and `maxMlCalls` are included to keep worst-case request processing bounded.
+Default limits such as `maxPayloadLength`, `maxDepth`, and `maxFields` are included to keep worst-case request processing bounded.
 
 ## Features
 
@@ -107,11 +109,11 @@ Node.js 18 or newer is required.
 
 ## Express Usage
 
-Register SQLGuard ML after body parsers and before protected routes.
+Register SQLGuard after body parsers and before protected routes.
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('sqlguard-ml');
+const { sqlguard } = require('sqlguard');
 
 const app = express();
 const guard = sqlguard({
@@ -150,7 +152,7 @@ You can also use `secureRouter()` when you want the router to handle both global
 
 ```javascript
 const express = require('express');
-const { secureRouter } = require('sqlguard-ml');
+const { secureRouter } = require('sqlguard');
 
 const app = express();
 const router = secureRouter({
@@ -262,7 +264,7 @@ Use learning events for review, clustering, and regression-test creation. Do not
 `threshold` is the confidence score at which a request is blocked. It is a weighted heuristic score, not a machine-learning probability.
 
 - `0`: no signal matched.
-- `0.2` to below `threshold`: suspicious. The request is allowed by default, but repeated suspicious requests can escalate, and `mlEndpoint` can provide a second opinion.
+- `0.2` to below `threshold`: suspicious. The request is allowed by default, but repeated suspicious requests from the same IP can escalate.
 - `threshold` and above: blocked unless `dryRun` is enabled.
 
 Defaults:
@@ -284,7 +286,7 @@ Tuning guidance:
 ## Detector API
 
 ```javascript
-const { Detector } = require('sqlguard-ml');
+const { Detector } = require('sqlguard');
 
 const detector = new Detector();
 
@@ -319,9 +321,7 @@ Example result:
 | Option | Default | Description |
 | --- | --- | --- |
 | `threshold` | `0.5` | Blocks when `result.confidence >= threshold`. |
-| `suspiciousThreshold` | `0.2` | Starts ML checks and repeated-probe tracking for non-benign results below `threshold`. |
-| `mlEndpoint` | `null` | Optional HTTP endpoint that receives `{ payload }` and can return `{ label, confidence }` or `{ isMalicious: true }`. |
-| `maxMlCalls` | `10` | Maximum ML calls per request. If exceeded, the middleware fails closed for additional suspicious payloads in that request. |
+| `suspiciousThreshold` | `0.2` | Starts learning events and repeated-probe tracking for non-benign results below `threshold`. |
 | `rateLimitWindowMs` | `300000` | Sliding window for repeated suspicious probes per IP. |
 | `maxSuspiciousRequests` | `3` | Suspicious requests per IP before escalation blocks. |
 | `maxRateLimitCapacity` | `10000` | Maximum IP entries stored in the in-memory limiter. |
@@ -351,7 +351,7 @@ Example result:
 ```json
 {
   "error": "Forbidden",
-  "message": "Malicious payload detected by SQLGuard ML",
+  "message": "Malicious payload detected by SQLGuard",
   "details": {
     "label": "sqli"
   }
@@ -364,49 +364,17 @@ Common labels:
 - `xss`
 - `schema_violation`
 - `rate_limit_escalation`
-- `rate_limit_sqli_heuristic`
 - `dos`
-- labels returned by your optional ML endpoint
 
 ## CLI
 
 ```bash
-sqlguard-ml scan "<script>alert(1)</script>"
-sqlguard-ml scan "1 UNION/**/SELECT password FROM users--"
-sqlguard-ml scan-file payloads.txt --format csv
+sqlguard scan "<script>alert(1)</script>"
+sqlguard scan "1 UNION/**/SELECT password FROM users--"
+sqlguard scan-file payloads.txt --format csv
 ```
 
 JSON is the default output. CSV output includes `payload,label,confidence`.
-
-## Optional ML Bridge
-
-The Node package works without Python. If you want a second opinion for suspicious-but-not-blocked payloads, run your own HTTP model endpoint and pass its URL as `mlEndpoint`.
-
-The Python bridge is source-only in this repository. It is not published to PyPI as `sqlguard-ml`.
-
-Development stub:
-
-```bash
-cd python
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install fastapi uvicorn scikit-learn
-$env:PYTHONPATH = "$PWD\src"
-python src/sqlguard_ml/train_stub.py
-python -m uvicorn sqlguard_ml.api:app --port 8000
-```
-
-Then configure:
-
-```javascript
-app.use(guard.global({
-  threshold: 0.6,
-  suspiciousThreshold: 0.2,
-  mlEndpoint: 'http://127.0.0.1:8000/api/v1/detect'
-}));
-```
-
-The included Python code is a reference pipeline. For production, train and operate your own model with representative data, versioning, latency limits, and monitoring.
 
 ## Security Guidance
 
@@ -433,7 +401,7 @@ Current result:
 
 ```text
 Test Suites: 9 passed, 9 total
-Tests: 50 passed, 50 total
+Tests: 51 passed, 51 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.
@@ -443,7 +411,6 @@ Contributors should add new bypasses or false positives as tests before changing
 ```text
 npm/                  Node package, Express middleware, CLI, and Jest tests
 npm/examples/         Minimal and production-style Express examples
-python/               Optional Python reference service
 test_integration/     Local Express integration example
 .github/workflows/    CI configuration
 ```

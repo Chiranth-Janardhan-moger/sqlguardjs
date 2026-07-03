@@ -62,27 +62,23 @@ describe('Rate Limiter Middleware Integration', () => {
     await middleware(req, mockRes, mockNext);
     expect(mockRes.status).toHaveBeenCalledWith(403);
     expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
-      message: 'Malicious payload detected by SQLGuard ML',
+      message: 'Malicious payload detected by SQLGuard',
       details: { label: 'rate_limit_escalation' }
     }));
   });
 
-  it('should fail closed after the per-request ML call cap', async () => {
+  it('should not make external calls for suspicious payloads', async () => {
     const realFetch = global.fetch;
-    const mockFetch = jest.fn(async () => ({
-      ok: true,
-      json: async () => ({ label: 'benign' })
-    }));
+    const mockFetch = jest.fn();
     global.fetch = mockFetch;
 
     const middleware = expressMiddleware({
       threshold: 0.6,
-      mlEndpoint: 'http://127.0.0.1:8000/api/detect',
       maxSuspiciousRequests: 999
     });
     const req = {
       ip: '3.3.3.3',
-      body: Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`field${i}`, 'javascript:']))
+      body: { link: 'javascript:' }
     };
 
     try {
@@ -91,11 +87,8 @@ describe('Rate Limiter Middleware Integration', () => {
       global.fetch = realFetch;
     }
 
-    expect(mockFetch).toHaveBeenCalledTimes(10);
-    expect(mockRes.status).toHaveBeenCalledWith(403);
-    expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
-      details: { label: 'rate_limit_sqli_heuristic' }
-    }));
-    expect(mockNext).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockRes.status).not.toHaveBeenCalled();
+    expect(mockNext).toHaveBeenCalledTimes(1);
   });
 });

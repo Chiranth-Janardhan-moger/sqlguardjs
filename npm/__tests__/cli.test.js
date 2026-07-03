@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const cliPath = path.join(__dirname, '..', 'bin', 'sqlguard-ml.js');
+const cliPath = path.join(__dirname, '..', 'bin', 'sqlguard.js');
 
 describe('CLI scanner', () => {
   it('scans a single adversarial payload as JSON', () => {
