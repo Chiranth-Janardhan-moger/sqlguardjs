@@ -62,7 +62,7 @@ describe('Rate Limiter Middleware Integration', () => {
     await middleware(req, mockRes, mockNext);
     expect(mockRes.status).toHaveBeenCalledWith(403);
     expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
-      message: 'Malicious payload detected by SQLGuard',
+      message: 'Malicious payload detected by SQLGuardJS',
       details: { label: 'rate_limit_escalation' }
     }));
   });

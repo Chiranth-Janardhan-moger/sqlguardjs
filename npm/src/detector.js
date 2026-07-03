@@ -95,7 +95,7 @@ function createDetectionEvent(req, payload, detection, options = {}) {
 
 function formatEvent(event, format = 'text') {
   if (format === 'json') return event;
-  return `[SQLGuard] ${event.action === 'observe' ? 'Attack Observed' : 'Attack Blocked'}: ${event.label} from IP: ${event.ip} | requestId: ${event.requestId || '-'} | path: ${event.path} | confidence: ${event.confidence} | Payload: ${event.payloadPreview}`;
+  return `[SQLGuardJS] ${event.action === 'observe' ? 'Attack Observed' : 'Attack Blocked'}: ${event.label} from IP: ${event.ip} | requestId: ${event.requestId || '-'} | path: ${event.path} | confidence: ${event.confidence} | Payload: ${event.payloadPreview}`;
 }
 
 function createLearningEvent(req, payload, result, path, options = {}) {
@@ -596,7 +596,7 @@ function expressMiddleware(options = {}) {
       if (dryRun) return next();
       return res.status(blockStatus).json({
         error: 'Forbidden',
-        message: 'Malicious payload detected by SQLGuard',
+        message: 'Malicious payload detected by SQLGuardJS',
         details: { label: attack.label }
       });
     }
@@ -617,7 +617,7 @@ function expressMiddleware(options = {}) {
         if (dryRun) return next();
         return res.status(blockStatus).json({
           error: 'Forbidden',
-          message: 'Malicious payload detected by SQLGuard',
+          message: 'Malicious payload detected by SQLGuardJS',
           details: { label: attack.label }
         });
       }

@@ -1,4 +1,4 @@
-# SQLGuard for Node.js
+# SQLGuardJS for Node.js
 
 [![npm version](https://img.shields.io/npm/v/sqlguardjs.svg)](https://www.npmjs.com/package/sqlguardjs)
 [![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguardjs/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguardjs/actions/workflows/ci.yml)
@@ -8,7 +8,7 @@
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
-SQLGuard is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads. It runs in-process and does not call a database or external service.
+SQLGuardJS is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads. It runs in-process and does not call a database or external service.
 
 ## 30-Second Quick Start
 
@@ -41,16 +41,16 @@ curl "http://localhost:3000/login?id=1%20UNION%20SELECT%20password%20FROM%20user
 
 ## Before and After
 
-Without SQLGuard:
+Without SQLGuardJS:
 
 ```text
 Attacker -> Express route -> Application logic -> Database or HTML rendering
 ```
 
-With SQLGuard:
+With SQLGuardJS:
 
 ```text
-Attacker -> SQLGuard -> Blocked with 403 if malicious, otherwise passed to the Express route.
+Attacker -> SQLGuardJS -> Blocked with 403 if malicious, otherwise passed to the Express route.
 ```
 
 ## Why `global()` and `route()` both exist
@@ -62,7 +62,7 @@ Express does not populate `req.params` until after a route is matched.
 
 ## Performance
 
-SQLGuard scans decoded request data in memory. Actual latency depends on payload size, nesting depth, logging, and schema checks.
+SQLGuardJS scans decoded request data in memory. Actual latency depends on payload size, nesting depth, logging, and schema checks.
 
 ## Secure Router
 

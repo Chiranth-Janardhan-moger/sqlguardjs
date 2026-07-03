@@ -1,4 +1,4 @@
-# SQLGuard
+# SQLGuardJS
 
 [![npm version](https://img.shields.io/npm/v/sqlguardjs.svg)](https://www.npmjs.com/package/sqlguardjs)
 [![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguardjs/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguardjs/actions/workflows/ci.yml)
@@ -8,9 +8,9 @@
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
-SQLGuard is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides an in-process heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, safe learning events, and request-size safety limits.
+SQLGuardJS is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides an in-process heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, safe learning events, and request-size safety limits.
 
-SQLGuard is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
+SQLGuardJS is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
 
 ## 30-Second Quick Start
 
@@ -61,7 +61,7 @@ app.post('/login', guard.route({
 
 ## Before and After
 
-Without SQLGuard:
+Without SQLGuardJS:
 
 ```text
 Attacker
@@ -70,17 +70,17 @@ Attacker
   -> Database or HTML rendering
 ```
 
-With SQLGuard:
+With SQLGuardJS:
 
 ```text
 Attacker
-  -> SQLGuard
+  -> SQLGuardJS
   -> Blocked with 403 if malicious, otherwise passed to the Express route.
 ```
 
 ## Why `global()` and `route()` both exist
 
-Express does not populate `req.params` until after a route is matched. SQLGuard therefore provides two guard points:
+Express does not populate `req.params` until after a route is matched. SQLGuardJS therefore provides two guard points:
 
 - `guard.global()` scans request bodies, query strings, headers, and cookies before route handlers run.
 - `guard.route()` scans `req.params` and applies optional route schemas after Express resolves the route.
@@ -89,7 +89,7 @@ Use both when you want all common request inputs inspected before your route log
 
 ## Performance
 
-SQLGuard scans decoded request data in memory. It does not call a database or external service. Actual latency depends on payload size, nesting depth, enabled logging, and schema checks.
+SQLGuardJS scans decoded request data in memory. It does not call a database or external service. Actual latency depends on payload size, nesting depth, enabled logging, and schema checks.
 
 Default limits such as `maxPayloadLength`, `maxDepth`, and `maxFields` are included to keep worst-case request processing bounded.
 
@@ -109,7 +109,7 @@ Node.js 18 or newer is required.
 
 ## Express Usage
 
-Register SQLGuard after body parsers and before protected routes.
+Register SQLGuardJS after body parsers and before protected routes.
 
 ```javascript
 const express = require('express');
@@ -351,7 +351,7 @@ Example result:
 ```json
 {
   "error": "Forbidden",
-  "message": "Malicious payload detected by SQLGuard",
+  "message": "Malicious payload detected by SQLGuardJS",
   "details": {
     "label": "sqli"
   }
