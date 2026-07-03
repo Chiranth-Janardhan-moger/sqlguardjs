@@ -1,1 +1,0 @@
-project_memory.md | The remediation plan for sqli_xss_detection specifies implementing IP rate-limiting, header deep scanning, Content-Type bypass handling, adding a Python FastAPI ML stub, an adversarial test suite, and updating documentation.
