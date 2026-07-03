@@ -20,6 +20,10 @@ dependencies = [
 dataset = [
     "pandas>=2.2,<3"
 ]
+test = [
+    "pytest",
+    "httpx"
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
