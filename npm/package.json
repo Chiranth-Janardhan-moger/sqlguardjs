@@ -18,12 +18,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Chiranth-Janardhan-moger/sqlguard.git"
+    "url": "git+https://github.com/Chiranth-Janardhan-moger/sqlguardjs.git"
   },
   "bugs": {
-    "url": "https://github.com/Chiranth-Janardhan-moger/sqlguard/issues"
+    "url": "https://github.com/Chiranth-Janardhan-moger/sqlguardjs/issues"
   },
-  "homepage": "https://github.com/Chiranth-Janardhan-moger/sqlguard#readme",
+  "homepage": "https://github.com/Chiranth-Janardhan-moger/sqlguardjs#readme",
   "license": "MIT",
   "files": [
     "bin",
