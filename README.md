@@ -261,7 +261,7 @@ Use learning events for review, clustering, and regression-test creation. Do not
 
 ## Thresholds
 
-`threshold` is the confidence score at which a request is blocked. It is a weighted heuristic score, not a machine-learning probability.
+`threshold` is the confidence score at which a request is blocked. It is a weighted heuristic score, not a statistical probability.
 
 - `0`: no signal matched.
 - `0.2` to below `threshold`: suspicious. The request is allowed by default, but repeated suspicious requests from the same IP can escalate.
