@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from sqlguardjs.api import app
+from pathlib import Path
 
 client = TestClient(app)
 
@@ -9,11 +10,10 @@ def test_health():
     assert response.json()["status"] == "ok"
 
 def test_detect():
-    # Make sure we have a trained model first
-    from sqlguardjs.train_stub import train_and_save
-    train_and_save()
+    models_dir = Path(__file__).resolve().parents[1] / "src" / "sqlguardjs" / "models"
+    assert (models_dir / "stub_model.pkl").exists()
+    assert (models_dir / "stub_vectorizer.pkl").exists()
     
-    # Needs to reload startup event or call it manually
     import asyncio
     from sqlguardjs.api import startup_event
     asyncio.run(startup_event())

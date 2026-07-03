@@ -111,7 +111,7 @@ Node.js 18 or newer is required.
 
 ## Express Usage
 
-Register SQLGuardJS after body parsers and before protected routes. SQLGuardJS scans data that Express has exposed on `req.query`, `req.body`, `req.headers`, `req.params`, `req.cookies`, and `req.rawBody`. It cannot inspect bytes that no upstream parser or capture middleware attaches to the request.
+Register SQLGuardJS after body parsers and before protected routes. SQLGuardJS scans data that Express has exposed on `req.query`, `req.body`, `req.headers`, `req.params`, `req.cookies`, and `req.rawBody`, including plain objects, arrays, buffers, `URLSearchParams`, `Map`, and `Set` containers. It cannot inspect bytes that no upstream parser or capture middleware attaches to the request.
 
 ```javascript
 const express = require('express');
@@ -446,7 +446,7 @@ Current result:
 
 ```text
 Test Suites: 9 passed, 9 total
-Tests: 123 passed, 123 total
+Tests: 130 passed, 130 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

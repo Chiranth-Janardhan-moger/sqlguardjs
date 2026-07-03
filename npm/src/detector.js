@@ -58,6 +58,37 @@ function readRequestProperty(obj, key, fallback = undefined) {
   }
 }
 
+function isURLSearchParams(value) {
+  return typeof URLSearchParams !== 'undefined' && value instanceof URLSearchParams;
+}
+
+function isMap(value) {
+  return value instanceof Map;
+}
+
+function isSet(value) {
+  return value instanceof Set;
+}
+
+function collectionEntries(value) {
+  if (isURLSearchParams(value) || isMap(value)) return [...value.entries()];
+  if (isSet(value)) return [...value.values()].map((entryValue, index) => [String(index), entryValue]);
+  return null;
+}
+
+function schemaKeys(source) {
+  if (isURLSearchParams(source) || isMap(source)) {
+    return [...new Set([...source.keys()].map(key => String(key)))];
+  }
+  return Object.keys(source);
+}
+
+function schemaHasKey(source, key) {
+  if (isURLSearchParams(source)) return source.has(key);
+  if (isMap(source)) return source.has(key);
+  return Object.prototype.hasOwnProperty.call(source, key);
+}
+
 function getIp(req) {
   const ip = readRequestProperty(req, 'ip', null);
   if (ip) return ip;
@@ -86,10 +117,6 @@ function sanitizeRequestId(value) {
 
 function defaultRawRequestId(req) {
   return req.id || req.requestId || req.headers?.['x-request-id'] || req.headers?.['x-correlation-id'] || null;
-}
-
-function isPromiseLike(value) {
-  return value && typeof value.then === 'function';
 }
 
 function callbackErrorMessage(error) {
@@ -230,7 +257,7 @@ function validateSchemaSource(sourceName, source, rule) {
 
   let keys;
   try {
-    keys = Object.keys(source);
+    keys = schemaKeys(source);
   } catch (_) {
     return {
       payload: `[Unreadable ${sourceName}]`,
@@ -264,7 +291,7 @@ function validateSchemaSource(sourceName, source, rule) {
   }
 
   for (const key of required) {
-    if (!Object.prototype.hasOwnProperty.call(source, key)) {
+    if (!schemaHasKey(source, key)) {
       return {
         payload: key,
         detection: {
@@ -445,6 +472,7 @@ class Detector {
       newline: '\n',
       grave: '`'
     };
+    const namedEntityPattern = new RegExp(`&(${Object.keys(namedEntities).sort((a, b) => b.length - a.length).join('|')});?`, 'gi');
     const decodeEntity = (match, hex, dec) => {
       const code = parseInt(hex || dec, hex ? 16 : 10);
       return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : match;
@@ -461,7 +489,7 @@ class Detector {
         .replace(/\\u([0-9a-fA-F]{4})/g, decodeCodePoint)
         .replace(/\\x([0-9a-fA-F]{2})/g, decodeCodePoint)
         .replace(/&#x([0-9a-fA-F]+);?|&#(\d+);?/g, decodeEntity)
-        .replace(/&([a-zA-Z][a-zA-Z0-9]+);/g, (match, name) => namedEntities[name.toLowerCase()] ?? match)
+        .replace(namedEntityPattern, (match, name) => namedEntities[name.toLowerCase()] ?? match)
         .replace(/[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/g, ' ')
         .replace(/[\u200b-\u200d\ufeff]/g, '')
         .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
@@ -570,8 +598,8 @@ function expressMiddleware(options = {}) {
   });
   const threshold = options.threshold ?? DEFAULT_THRESHOLD;
   const suspiciousThreshold = options.suspiciousThreshold ?? DEFAULT_SUSPICIOUS_THRESHOLD;
-  const rateLimiter = new IPRateLimiter(options.rateLimitWindowMs || 300000, options.maxRateLimitCapacity || 10000);
-  const maxSuspiciousRequests = options.maxSuspiciousRequests || 3;
+  const rateLimiter = new IPRateLimiter(options.rateLimitWindowMs ?? 300000, options.maxRateLimitCapacity ?? 10000);
+  const maxSuspiciousRequests = options.maxSuspiciousRequests ?? 3;
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
   const maxFields = options.maxFields ?? DEFAULT_MAX_FIELDS;
   const blockStatus = options.blockStatus ?? 403;
@@ -604,7 +632,7 @@ function expressMiddleware(options = {}) {
     const safeContext = callbackErrorContext(error, context);
     try {
       const result = onCallbackError(error, safeContext);
-      if (isPromiseLike(result)) result.catch(() => {});
+      Promise.resolve(result).catch(() => {});
     } catch (_) {
       // User error reporting must never affect request handling.
     }
@@ -615,9 +643,7 @@ function expressMiddleware(options = {}) {
 
     try {
       const result = callback(...args);
-      if (isPromiseLike(result)) {
-        result.catch(error => reportCallbackError(error, { ...context, hook }));
-      }
+      Promise.resolve(result).catch(error => reportCallbackError(error, { ...context, hook }));
       return result;
     } catch (error) {
       reportCallbackError(error, { ...context, hook });
@@ -637,7 +663,7 @@ function expressMiddleware(options = {}) {
   const safeRateLimitKey = async (req, fallback) => {
     try {
       const key = rateLimitKeyGetter(req);
-      const resolvedKey = isPromiseLike(key) ? await key : key;
+      const resolvedKey = await key;
       return String(resolvedKey || fallback || 'unknown');
     } catch (error) {
       reportCallbackError(error, { hook: 'rateLimitKey' });
@@ -669,7 +695,7 @@ function expressMiddleware(options = {}) {
     if (skip) {
       try {
         const skipResult = skip(req);
-        const shouldSkip = isPromiseLike(skipResult) ? await skipResult : skipResult;
+        const shouldSkip = await skipResult;
         if (shouldSkip) return next();
       } catch (error) {
         reportCallbackError(error, { hook: 'skip' });
@@ -747,44 +773,19 @@ function expressMiddleware(options = {}) {
       if (seen.has(obj)) return false;
       seen.add(obj);
       let attackFound = false;
-      let keys;
 
-      try {
-        keys = Object.keys(obj);
-      } catch (_) {
-        return reportDetection("[Object Enumeration Failed]", {
-          label: "dos",
-          confidence: 1,
-          path,
-          reason: 'object_enumeration_failed',
-          matches: [{ id: 'object-enumeration-failed', label: 'dos', confidence: 1 }]
-        });
-      }
-
-      for (const key of keys) {
+      const scanEntry = async (key, val, childPath, scanKey = true) => {
         scannedFields++;
         if (scannedFields > maxFields) {
           return reportDetection("[Field Limit Exceeded]", { label: "dos", confidence: 1, path, reason: 'max_fields_exceeded' });
         }
 
-        const childPath = Array.isArray(obj) ? `${path}[${key}]` : `${path}.${key}`;
-        let val;
-        try {
-          val = obj[key];
-        } catch (_) {
-          return reportDetection("[Object Property Access Failed]", {
-            label: "dos",
-            confidence: 1,
-            path: childPath,
-            reason: 'object_property_access_failed',
-            matches: [{ id: 'object-property-access-failed', label: 'dos', confidence: 1 }]
-          });
-        }
-
-        const keyAttack = scanKeys ? await scanString(key, `${childPath}.__key`) : false;
-        if (keyAttack) {
-          if (!dryRun) return keyAttack;
-          attackFound = attackFound || keyAttack;
+        if (scanKey) {
+          const keyAttack = scanKeys ? await scanString(String(key), `${childPath}.__key`) : false;
+          if (keyAttack) {
+            if (!dryRun) return keyAttack;
+            attackFound = attackFound || keyAttack;
+          }
         }
 
         if (typeof val === 'string') {
@@ -805,6 +806,71 @@ function expressMiddleware(options = {}) {
             if (!dryRun) return nestedAttack;
             attackFound = attackFound || nestedAttack;
           }
+        }
+
+        return false;
+      };
+
+      let entries;
+      try {
+        entries = collectionEntries(obj);
+      } catch (_) {
+        return reportDetection("[Object Enumeration Failed]", {
+          label: "dos",
+          confidence: 1,
+          path,
+          reason: 'object_enumeration_failed',
+          matches: [{ id: 'object-enumeration-failed', label: 'dos', confidence: 1 }]
+        });
+      }
+
+      if (entries) {
+        const scanEntryKeys = !isSet(obj);
+        for (const [key, val] of entries) {
+          const stringKey = String(key);
+          const childPath = scanEntryKeys ? `${path}.${stringKey}` : `${path}[${stringKey}]`;
+          const entryAttack = await scanEntry(stringKey, val, childPath, scanEntryKeys);
+          if (entryAttack) {
+            if (!dryRun) return entryAttack;
+            attackFound = attackFound || entryAttack;
+          }
+        }
+        return attackFound;
+      }
+
+      let keys;
+
+      try {
+        keys = Object.keys(obj);
+      } catch (_) {
+        return reportDetection("[Object Enumeration Failed]", {
+          label: "dos",
+          confidence: 1,
+          path,
+          reason: 'object_enumeration_failed',
+          matches: [{ id: 'object-enumeration-failed', label: 'dos', confidence: 1 }]
+        });
+      }
+
+      for (const key of keys) {
+        const childPath = Array.isArray(obj) ? `${path}[${key}]` : `${path}.${key}`;
+        let val;
+        try {
+          val = obj[key];
+        } catch (_) {
+          return reportDetection("[Object Property Access Failed]", {
+            label: "dos",
+            confidence: 1,
+            path: childPath,
+            reason: 'object_property_access_failed',
+            matches: [{ id: 'object-property-access-failed', label: 'dos', confidence: 1 }]
+          });
+        }
+
+        const entryAttack = await scanEntry(key, val, childPath);
+        if (entryAttack) {
+          if (!dryRun) return entryAttack;
+          attackFound = attackFound || entryAttack;
         }
       }
       return attackFound;

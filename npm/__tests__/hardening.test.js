@@ -7,10 +7,6 @@ function createMockResponse() {
   };
 }
 
-function flushPromises() {
-  return new Promise(resolve => setImmediate(resolve));
-}
-
 describe('Security hardening regressions', () => {
   let detector;
 
@@ -127,7 +123,9 @@ describe('Security hardening regressions', () => {
   it.each([
     ['fullwidth SQL keywords', 'ＵＮＩＯＮ　ＳＥＬＥＣＴ password FROM users', 'sqli'],
     ['fullwidth script tag', '＜script＞alert(1)＜/script＞', 'xss'],
-    ['HTML entity encoded event handler', '&#x3c;img src=x onerror=alert(1)&#x3e;', 'xss']
+    ['HTML entity encoded event handler', '&#x3c;img src=x onerror=alert(1)&#x3e;', 'xss'],
+    ['semicolon-less HTML entity script tag', '&ltscript&gtalert(1)&lt/script&gt', 'xss'],
+    ['uppercase semicolon-less HTML entity script tag', '&LTscript&GTalert(1)&LT/script&GT', 'xss']
   ])('normalizes %s', (_name, payload, label) => {
     const result = detector.detect(payload);
 
@@ -429,6 +427,48 @@ describe('Express middleware hardening options', () => {
   });
 
   it.each([
+    ['URLSearchParams query', { query: new URLSearchParams('q=ok&q=%3Cscript%3Ealert(1)%3C%2Fscript%3E') }, 'query.q'],
+    ['Map body', { body: new Map([['q', 'UNION SELECT password FROM users']]) }, 'body.q'],
+    ['Set body', { body: new Set(['<script>alert(1)</script>']) }, 'body[0]']
+  ])('scans non-plain request containers: %s', async (_name, req, expectedPath) => {
+    const middleware = expressMiddleware();
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(req.sqlguardjs.path).toBe(expectedPath);
+  });
+
+  it.each([
+    ['URLSearchParams query', new URLSearchParams('q=ok&isAdmin=true')],
+    ['Map body', new Map([['q', 'ok'], ['isAdmin', true]])]
+  ])('enforces schemas on keyed non-plain containers: %s', async (_name, source) => {
+    const middleware = expressMiddleware({
+      schema: {
+        body: { allowed: ['q'], required: ['q'] },
+        query: { allowed: ['q'], required: ['q'] }
+      }
+    });
+    const req = source instanceof URLSearchParams
+      ? { query: source, body: { q: 'ok' } }
+      : { body: source, query: { q: 'ok' } };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      details: { label: 'schema_violation' }
+    }));
+    expect(next).not.toHaveBeenCalled();
+    expect(req.sqlguardjs.reason).toBe('unexpected_field');
+  });
+
+  it.each([
     'ip',
     'connection',
     'originalUrl',
@@ -570,7 +610,7 @@ describe('Express middleware hardening options', () => {
     const next = jest.fn();
 
     await middleware(req, res, next);
-    await flushPromises();
+    await new Promise(resolve => setImmediate(resolve));
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();

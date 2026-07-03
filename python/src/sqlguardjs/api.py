@@ -28,7 +28,7 @@ async def startup_event():
         ml_model = joblib.load(model_path)
         ml_vectorizer = joblib.load(vec_path)
     else:
-        print("Warning: Stub models not found. Run train_stub.py first.")
+        print("Warning: Stub model artifacts not found.")
 
 @app.get("/health")
 async def health():

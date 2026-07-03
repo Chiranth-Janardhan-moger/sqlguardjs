@@ -66,7 +66,7 @@ SQLGuardJS scans decoded request data in memory. Actual latency depends on paylo
 
 For bulk endpoints, lower `maxFields` and `maxPayloadLength` to the largest valid request shape, or use `skip` and validate that upload path separately.
 
-SQLGuardJS scans Express-visible data. Register body parsers before the guard, and expose custom webhook or multipart bytes as `req.rawBody` if your route parses the raw stream later. Unparsed request streams are not visible to any middleware that only reads `req.body`.
+SQLGuardJS scans Express-visible data, including plain objects, arrays, buffers, `URLSearchParams`, `Map`, and `Set` containers. Register body parsers before the guard, and expose custom webhook or multipart bytes as `req.rawBody` if your route parses the raw stream later. Unparsed request streams are not visible to any middleware that only reads `req.body`.
 
 ## Secure Router
 
