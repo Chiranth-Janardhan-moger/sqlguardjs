@@ -10,34 +10,48 @@ jobs:
   test-python:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.13'
-    - name: Install dependencies
-      run: |
-        cd python
-        python -m pip install --upgrade pip
-        pip install -e . httpx pytest scikit-learn
-    - name: Test with pytest
-      run: |
-        cd python
-        pytest tests/
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          cd python
+          python -m pip install --upgrade pip
+          pip install -e . httpx pytest scikit-learn
+      - name: Test with pytest
+        run: |
+          cd python
+          pytest tests/
 
   test-node:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
     steps:
-    - uses: actions/checkout@v3
-    - name: Use Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18.x'
-    - name: Install dependencies
-      run: |
-        cd npm
-        npm ci
-    - name: Test
-      run: |
-        cd npm
-        npm test
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: npm/package-lock.json
+      - name: Install dependencies
+        run: |
+          cd npm
+          npm ci
+      - name: Test
+        run: |
+          cd npm
+          npm test
+      - name: Audit dependencies
+        run: |
+          cd npm
+          npm audit --audit-level=moderate
+      - name: Verify package contents
+        run: |
+          cd npm
+          npm pack --dry-run

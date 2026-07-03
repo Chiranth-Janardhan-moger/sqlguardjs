@@ -6,9 +6,11 @@ SQLGuard ML is a defense-in-depth request inspection library. Please do not trea
 
 | Version | Supported |
 | ------- | --------- |
-| 1.1.x   | Yes       |
 | 1.0.x   | Yes       |
-| 0.1.x   | No        |
+| 0.1.x   | Yes       |
+| < 0.1.0 | No        |
+
+Supported releases receive security fixes. Users should upgrade to a supported version before reporting a vulnerability.
 
 ## Reporting a Vulnerability
 

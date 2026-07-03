@@ -12,7 +12,9 @@ SQLGuard ML is a defense-in-depth control. It does not replace parameterized SQL
 - Detects XSS payloads including script tags, event-handler attributes, JavaScript execution URLs, dangerous HTML containers, `srcdoc`, and `data:text/html`.
 - Normalizes repeated URL encoding, `%uXXXX`, HTML entities, printable Base64, plus-separated query strings, Unicode spacing, zero-width characters, and control-character splitting.
 - Scans `req.query`, `req.body`, `req.headers`, `req.params`, `req.cookies`, nested objects, arrays, object keys, strings, and Buffers.
-- Supports weighted confidence scoring, suspicious request escalation, dry-run rollout, route skipping, structured detection callbacks, and request-size safety limits.
+- Supports a secure router API with `sqlguard().global()`, `sqlguard().route()`, and `secureRouter()`.
+- Supports weighted confidence scoring, suspicious request escalation, schema-aware route checks, safe learning events, dry-run rollout, route skipping, structured admin logs, and request-size safety limits.
+- Includes TypeScript definitions and real Express integration tests.
 
 ## Installation
 
@@ -28,24 +30,68 @@ Register SQLGuard ML after body parsers and before protected routes.
 
 ```javascript
 const express = require('express');
-const { expressMiddleware } = require('sqlguard-ml');
+const { sqlguard } = require('sqlguard-ml');
 
 const app = express();
+const guard = sqlguard({
+  threshold: 0.5,
+  suspiciousThreshold: 0.2,
+  logAttacks: true
+});
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-app.use(expressMiddleware({
-  threshold: 0.5,
-  suspiciousThreshold: 0.2,
-  logAttacks: true
-}));
+// Global scanner checks body, query, headers, and cookies.
+app.use(guard.global({ scanParams: false }));
 
-app.post('/login', (req, res) => {
+// Route verifier checks params after Express resolves them.
+app.get('/users/:id', guard.route(), (req, res) => {
+  res.json({ id: req.params.id });
+});
+
+app.post('/login', guard.route({
+  schema: {
+    body: {
+      allowed: ['email', 'password'],
+      required: ['email', 'password']
+    },
+    query: []
+  }
+}), (req, res) => {
   res.json({ ok: true });
 });
 
 app.listen(3000);
+```
+
+You can also use `secureRouter()` to apply global and route-level verification automatically:
+
+```javascript
+const express = require('express');
+const { secureRouter } = require('sqlguard-ml');
+
+const app = express();
+const router = secureRouter({
+  threshold: 0.5,
+  suspiciousThreshold: 0.2
+});
+
+app.use(express.json({ limit: '1mb' }));
+
+router.post('/login', {
+  schema: {
+    body: {
+      allowed: ['email', 'password'],
+      required: ['email', 'password']
+    },
+    query: []
+  }
+}, (req, res) => {
+  res.json({ ok: true });
+});
+
+app.use('/api', router);
 ```
 
 ## Production Rollout
@@ -53,28 +99,82 @@ app.listen(3000);
 Start with `dryRun: true` on real traffic. This records detections without blocking requests.
 
 ```javascript
-app.use(expressMiddleware({
+app.use(guard.global({
   dryRun: true,
+  logAttacks: event => {
+    // Admins see these events in the application logs or wherever this function sends them.
+    console.warn(JSON.stringify(event));
+  },
+  logFormat: 'json',
   onThreat(event, req) {
     console.warn({
       label: event.label,
       confidence: event.confidence,
       path: event.path,
+      matchedSignalIds: event.matchedSignalIds,
+      requestId: event.requestId,
       ip: req.ip
     });
   }
 }));
 ```
 
+If your app runs on Render, Railway, Fly.io, AWS, Azure, GCP, Docker, PM2, or a VPS, these events appear wherever your normal Node logs go. For a dashboard, pass `onThreat` and store the event in your database, logging platform, SIEM, or alerting system.
+
 After reviewing logs and tuning any route exclusions, enable blocking.
 
 ```javascript
-app.use(expressMiddleware({
+app.use(guard.global({
   dryRun: false,
   threshold: 0.5,
   skip: req => req.path === '/health'
 }));
 ```
+
+## Schema-Aware Route Checks
+
+Schemas let you define the fields a route expects. Unexpected fields and missing required fields are reported as `schema_violation`.
+
+```javascript
+router.post('/login', {
+  schema: {
+    body: {
+      allowed: ['email', 'password'],
+      required: ['email', 'password']
+    },
+    query: []
+  }
+}, handler);
+```
+
+Route schema keys can also be configured globally:
+
+```javascript
+app.use(sqlguard({
+  schemas: {
+    'POST /login': {
+      body: ['email', 'password'],
+      query: []
+    }
+  }
+}).global());
+```
+
+## Safe Learning Mode
+
+Learning mode records suspicious payloads that are allowed because they are below the blocking threshold. It does not retrain or change rules automatically.
+
+```javascript
+app.use(guard.global({
+  threshold: 0.9,
+  learning: true,
+  onLearningEvent(event) {
+    console.info(event.clusterKey, event.label, event.payloadPreview);
+  }
+}));
+```
+
+Use learning events for review, clustering, and regression-test creation. Do not automatically train on live traffic because attackers can poison self-learning systems.
 
 ## Thresholds
 
@@ -146,12 +246,19 @@ Example result:
 | `maxRateLimitCapacity` | `10000` | Maximum IP entries stored in the in-memory limiter. |
 | `dryRun` | `false` | Records detections and calls `next()` instead of blocking. |
 | `logAttacks` | `false` | `true` logs to `console.warn`; a function receives the formatted log message. |
+| `logFormat` | `text` | Use `json` to send structured events to `logAttacks`. |
 | `onThreat` | `undefined` | Callback receiving `(event, req)` for detections. |
+| `learning` | `false` | Records suspicious allowed payloads without changing detector behavior. |
+| `onLearningEvent` | `undefined` | Callback receiving learning candidates for human review. |
 | `blockStatus` | `403` | HTTP status code used for blocked requests. |
 | `skip` | `undefined` | Function `(req) => boolean`; return `true` to skip scanning. |
+| `schema` | `undefined` | Route schema for expected query, body, params, headers, and cookies. |
+| `schemas` | `undefined` | Map of route keys such as `POST /login` to schemas. |
 | `scanHeaders` | `true` | Scan `req.headers`. |
 | `scanCookies` | `true` | Scan `req.cookies` when present. |
 | `scanParams` | `true` | Scan `req.params`. |
+| `scanQuery` | `true` | Scan `req.query`. |
+| `scanBody` | `true` | Scan `req.body`. |
 | `scanKeys` | `true` | Scan object keys as well as values. |
 | `maxDepth` | `20` | Maximum object nesting depth before the request is treated as a DoS probe. |
 | `maxFields` | `1000` | Maximum object fields scanned per request before the request is treated as a DoS probe. |
@@ -174,6 +281,7 @@ Common labels:
 
 - `sqli`
 - `xss`
+- `schema_violation`
 - `rate_limit_escalation`
 - `rate_limit_sqli_heuristic`
 - `dos`
@@ -235,12 +343,13 @@ npm test
 ```
 
 The Node suite covers the detector, middleware, adversarial bypasses, header/raw body scanning, rate limiting, CLI behavior, package metadata, and benign traffic false-positive checks.
+It also includes real Express integration tests with `supertest` for query, body, params, schema checks, structured logs, and learning events.
 
 Current result:
 
 ```text
 Test Suites: 8 passed, 8 total
-Tests: 44 passed, 44 total
+Tests: 50 passed, 50 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.
@@ -249,6 +358,7 @@ Contributors should add new bypasses or false positives as tests before changing
 
 ```text
 npm/                  Node package, Express middleware, CLI, and Jest tests
+npm/examples/         Minimal and production-style Express examples
 python/               Optional Python reference service
 test_integration/     Local Express integration example
 .github/workflows/    CI configuration

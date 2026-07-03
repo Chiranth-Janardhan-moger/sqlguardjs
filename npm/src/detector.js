@@ -1,4 +1,5 @@
 const { IPRateLimiter } = require('./rateLimiter');
+const crypto = require('crypto');
 
 const DEFAULT_THRESHOLD = 0.5;
 const DEFAULT_SUSPICIOUS_THRESHOLD = 0.2;
@@ -7,6 +8,8 @@ const DEFAULT_MAX_DEPTH = 20;
 const DEFAULT_MAX_FIELDS = 1000;
 const DEFAULT_MAX_ML_CALLS = 10;
 const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*)';
+const HTTP_METHODS = ['all', 'get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
+const DEFAULT_REDACT_KEYS = ['password', 'passwd', 'pwd', 'token', 'secret', 'authorization', 'cookie', 'api_key', 'apikey'];
 
 const sqlWord = (word) => word.split('').join('[\\s\\u00a0]*');
 
@@ -23,6 +26,187 @@ function truncateForLog(value, maxLength = 500) {
   const text = String(value);
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength)}...[truncated ${text.length - maxLength} chars]`;
+}
+
+function getIp(req) {
+  return req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+}
+
+function getRequestUrl(req) {
+  return req.originalUrl || req.url || '';
+}
+
+function getRoutePath(req) {
+  if (req.route && req.route.path) {
+    const routePath = Array.isArray(req.route.path) ? req.route.path.join('|') : String(req.route.path);
+    return `${req.baseUrl || ''}${routePath}`;
+  }
+  return req.path || getRequestUrl(req).split('?')[0] || '';
+}
+
+function defaultRequestId(req) {
+  return req.id || req.requestId || req.headers?.['x-request-id'] || req.headers?.['x-correlation-id'] || null;
+}
+
+function isSensitivePath(path, redactKeys = DEFAULT_REDACT_KEYS) {
+  const lowered = String(path || '').toLowerCase();
+  return redactKeys.some(key => lowered.includes(String(key).toLowerCase()));
+}
+
+function payloadPreview(payload, path, options = {}) {
+  if (isSensitivePath(path, options.redactKeys)) return '[redacted]';
+  return truncateForLog(payload, options.maxLogPayloadLength ?? 300);
+}
+
+function payloadFingerprint(payload) {
+  const normalized = String(payload)
+    .toLowerCase()
+    .replace(/[a-z]+/g, 'a')
+    .replace(/\d+/g, '0')
+    .replace(/\s+/g, ' ')
+    .slice(0, 1000);
+  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 16);
+}
+
+function createDetectionEvent(req, payload, detection, options = {}) {
+  const matches = detection.matches || [];
+  const action = options.dryRun ? 'observe' : (detection.action || 'block');
+  return {
+    type: 'sqlguard.threat',
+    detected: true,
+    timestamp: new Date().toISOString(),
+    action,
+    blocked: action === 'block',
+    dryRun: options.dryRun === true,
+    requestId: options.getRequestId(req),
+    method: req.method || null,
+    url: getRequestUrl(req),
+    route: getRoutePath(req),
+    ip: getIp(req),
+    label: detection.label,
+    confidence: detection.confidence,
+    path: detection.path,
+    matches,
+    matchedSignalIds: matches.map(match => match.id),
+    payloadPreview: payloadPreview(payload, detection.path, options),
+    payloadLength: String(payload).length,
+    reason: detection.reason || null
+  };
+}
+
+function formatEvent(event, format = 'text') {
+  if (format === 'json') return event;
+  return `[SQLGuard] ${event.action === 'observe' ? 'Attack Observed' : 'Attack Blocked'}: ${event.label} from IP: ${event.ip} | requestId: ${event.requestId || '-'} | path: ${event.path} | confidence: ${event.confidence} | Payload: ${event.payloadPreview}`;
+}
+
+function createLearningEvent(req, payload, result, path, options = {}) {
+  const matchedSignalIds = (result.matches || []).map(match => match.id);
+  const fingerprint = payloadFingerprint(payload);
+  return {
+    type: 'sqlguard.learning',
+    timestamp: new Date().toISOString(),
+    requestId: options.getRequestId(req),
+    method: req.method || null,
+    url: getRequestUrl(req),
+    route: getRoutePath(req),
+    ip: getIp(req),
+    label: result.label,
+    confidence: result.confidence,
+    path,
+    matches: result.matches || [],
+    matchedSignalIds,
+    clusterKey: `${result.label}:${matchedSignalIds.join('+') || 'unknown'}:${fingerprint}`,
+    payloadPreview: payloadPreview(payload, path, options),
+    payloadLength: String(payload).length
+  };
+}
+
+function normalizeSchemaRule(rule) {
+  if (!rule) return null;
+  if (Array.isArray(rule)) return { allowed: rule, required: [], allowUnknown: false };
+  return {
+    allowed: rule.allowed || rule.fields || [],
+    required: rule.required || [],
+    allowUnknown: rule.allowUnknown === true
+  };
+}
+
+function pathnameFromRequest(req) {
+  return (getRequestUrl(req).split('?')[0] || req.path || '').replace(/\/+$/, '') || '/';
+}
+
+function schemaCandidates(req) {
+  const method = (req.method || '').toUpperCase();
+  const route = getRoutePath(req);
+  const path = pathnameFromRequest(req);
+  const candidates = [...new Set([route, path].filter(Boolean))];
+  return [
+    ...candidates.map(candidate => `${method} ${candidate}`),
+    ...candidates
+  ];
+}
+
+function resolveSchema(req, options = {}) {
+  if (options.schema) return options.schema;
+  if (!options.schemas) return null;
+  for (const key of schemaCandidates(req)) {
+    if (options.schemas[key]) return options.schemas[key];
+  }
+  return null;
+}
+
+function validateSchemaSource(sourceName, source, rule) {
+  const normalized = normalizeSchemaRule(rule);
+  if (!normalized || !source || typeof source !== 'object' || Buffer.isBuffer(source)) return null;
+
+  const keys = Object.keys(source);
+  const allowed = new Set(normalized.allowed);
+  const required = new Set(normalized.required);
+
+  if (!normalized.allowUnknown && allowed.size > 0) {
+    for (const key of keys) {
+      if (!allowed.has(key)) {
+        return {
+          payload: key,
+          detection: {
+            label: 'schema_violation',
+            confidence: 1,
+            path: `${sourceName}.${key}`,
+            reason: 'unexpected_field',
+            matches: [{ id: 'schema-unexpected-field', label: 'schema', confidence: 1 }]
+          }
+        };
+      }
+    }
+  }
+
+  for (const key of required) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) {
+      return {
+        payload: key,
+        detection: {
+          label: 'schema_violation',
+          confidence: 1,
+          path: `${sourceName}.${key}`,
+          reason: 'missing_required_field',
+          matches: [{ id: 'schema-missing-required-field', label: 'schema', confidence: 1 }]
+        }
+      };
+    }
+  }
+
+  return null;
+}
+
+function validateSchema(req, schema) {
+  if (!schema) return null;
+  return (
+    validateSchemaSource('query', req.query, schema.query) ||
+    validateSchemaSource('body', req.body, schema.body) ||
+    validateSchemaSource('params', req.params, schema.params) ||
+    validateSchemaSource('headers', req.headers, schema.headers) ||
+    validateSchemaSource('cookies', req.cookies, schema.cookies)
+  );
 }
 
 class Detector {
@@ -271,26 +455,50 @@ function expressMiddleware(options = {}) {
   const maxMlCalls = options.maxMlCalls ?? DEFAULT_MAX_ML_CALLS;
   const blockStatus = options.blockStatus ?? 403;
   const dryRun = options.dryRun === true;
+  const scanQuery = options.scanQuery !== false;
+  const scanBody = options.scanBody !== false;
   const scanHeaders = options.scanHeaders !== false;
   const scanCookies = options.scanCookies !== false;
   const scanParams = options.scanParams !== false;
   const scanKeys = options.scanKeys !== false;
   const skip = typeof options.skip === 'function' ? options.skip : null;
   const onThreat = typeof options.onThreat === 'function' ? options.onThreat : null;
-  const logger = typeof options.logAttacks === 'function' ? options.logAttacks : (options.logAttacks ? console.warn : () => {});
+  const learning = options.learning === true ? { enabled: true } : (options.learning || {});
+  const onLearningEvent = typeof options.onLearningEvent === 'function'
+    ? options.onLearningEvent
+    : (typeof learning.onEvent === 'function' ? learning.onEvent : null);
+  const learningEnabled = learning.enabled === true || options.learning === true || onLearningEvent !== null;
+  const logFormat = options.logFormat || (options.jsonLogs ? 'json' : 'text');
+  const logger = typeof options.logAttacks === 'function'
+    ? options.logAttacks
+    : (options.logAttacks ? console.warn : null);
+  const eventOptions = {
+    dryRun,
+    redactKeys: options.redactKeys || DEFAULT_REDACT_KEYS,
+    maxLogPayloadLength: options.maxLogPayloadLength,
+    getRequestId: typeof options.getRequestId === 'function' ? options.getRequestId : defaultRequestId
+  };
 
-  const logAttack = (ip, payload, detection) => {
-    logger(`[SQLGuard] ${dryRun ? 'Attack Observed' : 'Attack Blocked'}: ${detection.label} from IP: ${ip} | path: ${detection.path} | confidence: ${detection.confidence} | Payload: ${truncateForLog(payload)}`);
+  const writeLog = (event) => {
+    if (!logger) return;
+    logger(formatEvent(event, logFormat), event);
+  };
+
+  const emitLearning = (req, payload, result, path) => {
+    if (!learningEnabled) return;
+    const event = createLearningEvent(req, payload, result, path, eventOptions);
+    req.sqlguardLearning = req.sqlguardLearning || [];
+    req.sqlguardLearning.push(event);
+    if (onLearningEvent) onLearningEvent(event, req);
   };
 
   return async (req, res, next) => {
     if (skip && skip(req)) return next();
 
-    const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
-    const sources = [
-      ['query', req.query],
-      ['body', req.body]
-    ];
+    const ip = getIp(req);
+    const sources = [];
+    if (scanQuery) sources.push(['query', req.query]);
+    if (scanBody) sources.push(['body', req.body]);
     if (scanHeaders) sources.push(['headers', req.headers]);
     if (scanParams) sources.push(['params', req.params]);
     if (scanCookies) sources.push(['cookies', req.cookies]);
@@ -299,16 +507,10 @@ function expressMiddleware(options = {}) {
     let scannedFields = 0;
 
     const reportDetection = (payload, detection) => {
-      req.sqlguard = {
-        detected: true,
-        dryRun,
-        label: detection.label,
-        confidence: detection.confidence,
-        path: detection.path,
-        matches: detection.matches || []
-      };
-      if (onThreat) onThreat(req.sqlguard, req);
-      logAttack(ip, payload, detection);
+      const event = createDetectionEvent(req, payload, detection, eventOptions);
+      req.sqlguard = event;
+      if (onThreat) onThreat(event, req);
+      writeLog(event);
       return { isMalicious: true, label: detection.label };
     };
 
@@ -320,12 +522,32 @@ function expressMiddleware(options = {}) {
       let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
 
       if (!isMalicious && result.label !== 'benign' && result.confidence >= suspiciousThreshold) {
+        emitLearning(req, str, result, path);
         const suspiciousCount = rateLimiter.recordSuspicious(ip);
         if (suspiciousCount >= maxSuspiciousRequests) {
            isMalicious = true;
            finalLabel = "rate_limit_escalation";
            finalConfidence = threshold;
-           logger(`[SQLGuard] IP ${ip} blocked due to repeated ambiguous probes.`);
+           if (logger) logger(formatEvent({
+             type: 'sqlguard.rate_limit',
+             timestamp: new Date().toISOString(),
+             action: dryRun ? 'observe' : 'block',
+             blocked: !dryRun,
+             dryRun,
+             requestId: eventOptions.getRequestId(req),
+             method: req.method || null,
+             url: getRequestUrl(req),
+             route: getRoutePath(req),
+             ip: getIp(req),
+             label: finalLabel,
+             confidence: finalConfidence,
+             path,
+             matches: result.matches || [],
+             matchedSignalIds: (result.matches || []).map(match => match.id),
+             payloadPreview: payloadPreview(str, path, eventOptions),
+             payloadLength: String(str).length,
+             reason: 'repeated_suspicious_probe'
+           }, logFormat));
         } else if (mlEndpoint) {
           if (mlCallCount >= maxMlCalls) {
              // Fallback to strict heuristic if attacker is spamming borderline payloads
@@ -349,7 +571,9 @@ function expressMiddleware(options = {}) {
                 }
               }
             } catch (e) {
-               logger(`[SQLGuard] ML Bridge error: ${e.message}`);
+               if (logger) logger(logFormat === 'json'
+                 ? { type: 'sqlguard.ml_error', timestamp: new Date().toISOString(), message: e.message, requestId: eventOptions.getRequestId(req) }
+                 : `[SQLGuard] ML Bridge error: ${e.message}`);
             }
           }
         }
@@ -369,8 +593,7 @@ function expressMiddleware(options = {}) {
     const deepScan = async (obj, path, currentDepth = 0, seen = new WeakSet()) => {
       if (!obj || typeof obj !== 'object') return false;
       if (currentDepth > maxDepth) {
-         logAttack(ip, "[JSON Depth Exceeded]", { label: "dos", confidence: 1, path });
-         return { isMalicious: true, label: 'dos' };
+         return reportDetection("[JSON Depth Exceeded]", { label: "dos", confidence: 1, path, reason: 'max_depth_exceeded' });
       }
       if (seen.has(obj)) return false;
       seen.add(obj);
@@ -378,8 +601,7 @@ function expressMiddleware(options = {}) {
       for (const [key, val] of Object.entries(obj)) {
         scannedFields++;
         if (scannedFields > maxFields) {
-          logAttack(ip, "[Field Limit Exceeded]", { label: "dos", confidence: 1, path });
-          return { isMalicious: true, label: 'dos' };
+          return reportDetection("[Field Limit Exceeded]", { label: "dos", confidence: 1, path, reason: 'max_fields_exceeded' });
         }
 
         const childPath = Array.isArray(obj) ? `${path}[${key}]` : `${path}.${key}`;
@@ -399,6 +621,17 @@ function expressMiddleware(options = {}) {
       }
       return false;
     };
+
+    const schemaResult = validateSchema(req, resolveSchema(req, options));
+    if (schemaResult) {
+      const attack = reportDetection(schemaResult.payload, schemaResult.detection);
+      if (dryRun) return next();
+      return res.status(blockStatus).json({
+        error: 'Forbidden',
+        message: 'Malicious payload detected by SQLGuard ML',
+        details: { label: attack.label }
+      });
+    }
 
     for (const [sourceName, source] of sources) {
       if (!source) continue;
@@ -425,4 +658,77 @@ function expressMiddleware(options = {}) {
   };
 }
 
-module.exports = { Detector, expressMiddleware };
+function mergeOptions(base, override) {
+  return { ...base, ...(override || {}) };
+}
+
+function sqlguard(options = {}) {
+  const baseOptions = {
+    ...options,
+    detector: options.detector || new Detector({ maxPayloadLength: options.maxPayloadLength })
+  };
+
+  return {
+    global(overrides = {}) {
+      return expressMiddleware(mergeOptions(baseOptions, overrides));
+    },
+    route(overrides = {}) {
+      return expressMiddleware(mergeOptions({
+        ...baseOptions,
+        scanQuery: false,
+        scanBody: false,
+        scanHeaders: false,
+        scanCookies: false,
+        scanParams: true
+      }, overrides));
+    },
+    verify(overrides = {}) {
+      return this.route(overrides);
+    },
+    middleware(overrides = {}) {
+      return expressMiddleware(mergeOptions(baseOptions, overrides));
+    },
+    detector: baseOptions.detector
+  };
+}
+
+function isPlainOptions(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) && typeof value !== 'function';
+}
+
+function secureRouter(options = {}) {
+  let express;
+  try {
+    express = require('express');
+  } catch (e) {
+    throw new Error('secureRouter() requires express to be installed in the host application.');
+  }
+
+  const router = express.Router(options.routerOptions || {});
+  const guard = sqlguard(options);
+  router.use(guard.global({ ...(options.globalOptions || {}), scanParams: false }));
+
+  for (const method of HTTP_METHODS) {
+    const original = router[method].bind(router);
+    router[method] = (path, ...handlers) => {
+      let routeOptions = options.routeOptions || {};
+      if (handlers.length > 0 && isPlainOptions(handlers[0])) {
+        routeOptions = mergeOptions(routeOptions, handlers.shift());
+      }
+
+      return original(
+        path,
+        guard.route({
+          ...routeOptions,
+          schema: routeOptions.schema,
+          scanParams: routeOptions.scanParams !== false
+        }),
+        ...handlers
+      );
+    };
+  }
+
+  return router;
+}
+
+module.exports = { Detector, expressMiddleware, sqlguard, secureRouter };
