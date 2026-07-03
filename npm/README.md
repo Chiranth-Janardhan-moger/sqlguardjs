@@ -66,6 +66,8 @@ SQLGuardJS scans decoded request data in memory. Actual latency depends on paylo
 
 For bulk endpoints, lower `maxFields` and `maxPayloadLength` to the largest valid request shape, or use `skip` and validate that upload path separately.
 
+SQLGuardJS scans Express-visible data. Register body parsers before the guard, and expose custom webhook or multipart bytes as `req.rawBody` if your route parses the raw stream later. Unparsed request streams are not visible to any middleware that only reads `req.body`.
+
 ## Secure Router
 
 Use `secureRouter()` when you want the router to handle both global request scanning and route-level parameter/schema checks automatically.
@@ -104,12 +106,16 @@ app.use(guard.global({
   logAttacks: event => console.warn(JSON.stringify(event)),
   onThreat(event) {
     console.warn(event.requestId, event.label, event.confidence, event.matchedSignalIds);
+  },
+  onCallbackError(error, context) {
+    console.error('SQLGuardJS callback failed', context);
   }
 }));
 ```
 
 Sensitive fields such as passwords and tokens are redacted in payload previews by default.
 Use `logFormat: 'json'` for production log ingestion. Text logs escape carriage returns and newlines, but structured logs are safer for line-oriented parsers.
+Failures thrown by `logAttacks`, `onThreat`, and `onLearningEvent` are isolated from request handling. Use `onCallbackError` to monitor logging, alerting, or review-queue failures.
 
 In `dryRun` mode, SQLGuardJS scans the full request instead of stopping at the first detection. The first detection is stored on `req.sqlguardjs`; all detections are stored on `req.sqlguardjsDetections`.
 

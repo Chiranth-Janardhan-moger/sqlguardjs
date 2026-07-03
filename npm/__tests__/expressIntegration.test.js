@@ -2,6 +2,19 @@ const express = require('express');
 const request = require('supertest');
 const { expressMiddleware, secureRouter, sqlguardjs } = require('../src/detector');
 
+function captureRawBody(req, res, next) {
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', chunk => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    req.rawBody = body;
+    next();
+  });
+  req.on('error', next);
+}
+
 describe('Express integration', () => {
   it('blocks route params after Express resolves them', async () => {
     const app = express();
@@ -112,6 +125,71 @@ describe('Express integration', () => {
     await request(app)
       .get('/headers')
       .set('x-forwarded-for', ['127.0.0.1', '<script>alert(1)</script>'])
+      .expect(403);
+  });
+
+  it('scans duplicate query parameters instead of trusting one parsed value', async () => {
+    const app = express();
+
+    app.use(expressMiddleware());
+    app.get('/search', (req, res) => res.json({ id: req.query.id }));
+
+    await request(app)
+      .get('/search?id=1&id=%3Cscript%3Ealert(1)%3C%2Fscript%3E')
+      .expect(403);
+  });
+
+  it('scans text/plain bodies when a text parser exposes them before the guard', async () => {
+    const app = express();
+
+    app.use(express.text({ type: 'text/plain' }));
+    app.use(expressMiddleware());
+    app.post('/webhook', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'text/plain')
+      .send('{"id":"1 UNION SELECT password FROM users"}')
+      .expect(403);
+  });
+
+  it('scans req.rawBody for custom parser or webhook endpoints', async () => {
+    const app = express();
+
+    app.use(captureRawBody);
+    app.use(expressMiddleware());
+    app.post('/webhook', (req, res) => {
+      JSON.parse(req.rawBody);
+      res.json({ ok: true });
+    });
+
+    await request(app)
+      .post('/webhook')
+      .set('Content-Type', 'text/plain')
+      .send('{"id":"1 UNION SELECT password FROM users"}')
+      .expect(403);
+  });
+
+  it('can inspect raw multipart form-data when the app captures rawBody before custom parsing', async () => {
+    const app = express();
+    const boundary = 'sqlguardjsBoundary';
+    const multipartBody = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="comment"',
+      '',
+      '<script>alert(1)</script>',
+      `--${boundary}--`,
+      ''
+    ].join('\r\n');
+
+    app.use(captureRawBody);
+    app.use(expressMiddleware());
+    app.post('/upload', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .post('/upload')
+      .set('Content-Type', `multipart/form-data; boundary=${boundary}`)
+      .send(multipartBody)
       .expect(403);
   });
 

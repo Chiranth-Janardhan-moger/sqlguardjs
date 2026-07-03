@@ -7,6 +7,10 @@ function createMockResponse() {
   };
 }
 
+function flushPromises() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 describe('Security hardening regressions', () => {
   let detector;
 
@@ -321,5 +325,185 @@ describe('Express middleware hardening options', () => {
 
     expect(next).toHaveBeenCalledTimes(1);
     expect(res.status).toHaveBeenCalledWith(406);
+  });
+
+  it('does not let a throwing log callback break attack blocking', async () => {
+    const onCallbackError = jest.fn();
+    const middleware = expressMiddleware({
+      logAttacks: () => {
+        throw new Error('siem unavailable');
+      },
+      onCallbackError
+    });
+    const req = {
+      query: { q: "1' OR '1'='1" }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(onCallbackError).toHaveBeenCalledTimes(1);
+    expect(onCallbackError.mock.calls[0][1]).toEqual(expect.objectContaining({
+      type: 'sqlguardjs.callback_error',
+      hook: 'logAttacks',
+      message: 'siem unavailable',
+      eventType: 'sqlguardjs.threat',
+      eventLabel: 'sqli'
+    }));
+  });
+
+  it('does not let an async log callback rejection break attack blocking', async () => {
+    const onCallbackError = jest.fn();
+    const middleware = expressMiddleware({
+      logAttacks: () => Promise.reject(new Error('async siem unavailable')),
+      onCallbackError
+    });
+    const req = {
+      query: { q: "1' OR '1'='1" }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+    await flushPromises();
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(onCallbackError).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({
+      hook: 'logAttacks',
+      message: 'async siem unavailable'
+    }));
+  });
+
+  it('does not let the callback-error reporter break attack blocking', async () => {
+    const middleware = expressMiddleware({
+      logAttacks: () => {
+        throw new Error('primary logger failed');
+      },
+      onCallbackError: () => {
+        throw new Error('secondary reporter failed');
+      }
+    });
+    const req = {
+      query: { q: "1' OR '1'='1" }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('does not let a throwing onThreat callback break attack blocking', async () => {
+    const onCallbackError = jest.fn();
+    const middleware = expressMiddleware({
+      onThreat: () => {
+        throw new Error('alert sink unavailable');
+      },
+      onCallbackError
+    });
+    const req = {
+      body: { q: '<script>alert(1)</script>' }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(onCallbackError).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({
+      hook: 'onThreat',
+      message: 'alert sink unavailable',
+      eventLabel: 'xss'
+    }));
+  });
+
+  it('does not let a throwing learning callback block an allowed suspicious request', async () => {
+    const onCallbackError = jest.fn();
+    const middleware = expressMiddleware({
+      threshold: 0.9,
+      maxSuspiciousRequests: 999,
+      learning: true,
+      onLearningEvent: () => {
+        throw new Error('review queue unavailable');
+      },
+      onCallbackError
+    });
+    const req = {
+      query: { next: 'javascript:' }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(onCallbackError).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({
+      hook: 'onLearningEvent',
+      message: 'review queue unavailable',
+      eventType: 'sqlguardjs.learning'
+    }));
+  });
+
+  it('continues scanning when a skip callback throws', async () => {
+    const onCallbackError = jest.fn();
+    const middleware = expressMiddleware({
+      skip: () => {
+        throw new Error('skip policy failed');
+      },
+      onCallbackError
+    });
+    const req = {
+      path: '/login',
+      body: { q: '<script>alert(1)</script>' }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(onCallbackError).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({
+      hook: 'skip',
+      message: 'skip policy failed'
+    }));
+  });
+
+  it('falls back safely when request ID or rate-limit key callbacks throw', async () => {
+    const onCallbackError = jest.fn();
+    const middleware = expressMiddleware({
+      getRequestId: () => {
+        throw new Error('bad request id source');
+      },
+      rateLimitKey: () => {
+        throw new Error('bad rate key source');
+      },
+      onCallbackError
+    });
+    const req = {
+      ip: '203.0.113.10',
+      body: { q: 'UNION SELECT password FROM users' }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(req.sqlguardjs.requestId).toBeNull();
+    expect(req.sqlguardjs.ip).toBe('203.0.113.10');
+    expect(onCallbackError.mock.calls.map(call => call[1].hook)).toEqual(expect.arrayContaining([
+      'getRequestId',
+      'rateLimitKey'
+    ]));
   });
 });

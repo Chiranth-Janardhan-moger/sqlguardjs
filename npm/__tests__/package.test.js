@@ -13,6 +13,12 @@ describe('package metadata', () => {
     expect(pkg.bin.sqlguardjs).toBe('bin/sqlguardjs.js');
   });
 
+  it('should point package metadata at the sqlguardjs repository', () => {
+    expect(pkg.repository.url).toBe('git+https://github.com/Chiranth-Janardhan-moger/sqlguardjs.git');
+    expect(pkg.bugs.url).toBe('https://github.com/Chiranth-Janardhan-moger/sqlguardjs/issues');
+    expect(pkg.homepage).toBe('https://github.com/Chiranth-Janardhan-moger/sqlguardjs#readme');
+  });
+
   it('should publish runtime files only', () => {
     expect(pkg.files).toEqual(['bin', 'src', '__tests__', 'examples', 'index.d.ts']);
   });

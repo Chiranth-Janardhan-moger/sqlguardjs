@@ -67,6 +67,30 @@ function defaultRawRequestId(req) {
   return req.id || req.requestId || req.headers?.['x-request-id'] || req.headers?.['x-correlation-id'] || null;
 }
 
+function isPromiseLike(value) {
+  return value && typeof value.then === 'function';
+}
+
+function callbackErrorMessage(error) {
+  try {
+    return sanitizeForLog(error && error.message ? error.message : String(error));
+  } catch (_) {
+    return '[unavailable]';
+  }
+}
+
+function callbackErrorContext(error, context = {}) {
+  return {
+    type: 'sqlguardjs.callback_error',
+    timestamp: new Date().toISOString(),
+    hook: context.hook || 'unknown',
+    message: callbackErrorMessage(error),
+    eventType: context.event?.type || null,
+    eventLabel: context.event?.label || null,
+    eventPath: context.event?.path || null
+  };
+}
+
 function isSensitivePath(path, redactKeys = DEFAULT_REDACT_KEYS) {
   const lowered = String(path || '').toLowerCase();
   return redactKeys.some(key => lowered.includes(String(key).toLowerCase()));
@@ -516,6 +540,7 @@ function expressMiddleware(options = {}) {
   const scanCookies = options.scanCookies !== false;
   const scanParams = options.scanParams !== false;
   const scanKeys = options.scanKeys !== false;
+  const scanRawBody = options.scanRawBody !== false;
   const skip = typeof options.skip === 'function' ? options.skip : null;
   const onThreat = typeof options.onThreat === 'function' ? options.onThreat : null;
   const learning = options.learning === true ? { enabled: true } : (options.learning || {});
@@ -529,16 +554,65 @@ function expressMiddleware(options = {}) {
     : (options.logAttacks ? console.warn : null);
   const requestIdGetter = typeof options.getRequestId === 'function' ? options.getRequestId : defaultRawRequestId;
   const rateLimitKeyGetter = typeof options.rateLimitKey === 'function' ? options.rateLimitKey : getIp;
+  const onCallbackError = typeof options.onCallbackError === 'function' ? options.onCallbackError : null;
+
+  const reportCallbackError = (error, context = {}) => {
+    if (!onCallbackError) return;
+
+    const safeContext = callbackErrorContext(error, context);
+    try {
+      const result = onCallbackError(error, safeContext);
+      if (isPromiseLike(result)) result.catch(() => {});
+    } catch (_) {
+      // User error reporting must never affect request handling.
+    }
+  };
+
+  const safeCall = (hook, callback, args, context = {}) => {
+    if (typeof callback !== 'function') return undefined;
+
+    try {
+      const result = callback(...args);
+      if (isPromiseLike(result)) {
+        result.catch(error => reportCallbackError(error, { ...context, hook }));
+      }
+      return result;
+    } catch (error) {
+      reportCallbackError(error, { ...context, hook });
+      return undefined;
+    }
+  };
+
+  const safeRequestId = (req) => {
+    try {
+      return sanitizeRequestId(requestIdGetter(req));
+    } catch (error) {
+      reportCallbackError(error, { hook: 'getRequestId' });
+      return null;
+    }
+  };
+
+  const safeRateLimitKey = async (req, fallback) => {
+    try {
+      const key = rateLimitKeyGetter(req);
+      const resolvedKey = isPromiseLike(key) ? await key : key;
+      return String(resolvedKey || fallback || 'unknown');
+    } catch (error) {
+      reportCallbackError(error, { hook: 'rateLimitKey' });
+      return String(fallback || 'unknown');
+    }
+  };
+
   const eventOptions = {
     dryRun,
     redactKeys: options.redactKeys || DEFAULT_REDACT_KEYS,
     maxLogPayloadLength: options.maxLogPayloadLength,
-    getRequestId: req => sanitizeRequestId(requestIdGetter(req))
+    getRequestId: safeRequestId
   };
 
   const writeLog = (event) => {
     if (!logger) return;
-    logger(formatEvent(event, logFormat), event);
+    safeCall('logAttacks', logger, [formatEvent(event, logFormat), event], { event });
   };
 
   const emitLearning = (req, payload, result, path) => {
@@ -546,17 +620,26 @@ function expressMiddleware(options = {}) {
     const event = createLearningEvent(req, payload, result, path, eventOptions);
     req.sqlguardjsLearning = req.sqlguardjsLearning || [];
     req.sqlguardjsLearning.push(event);
-    if (onLearningEvent) onLearningEvent(event, req);
+    safeCall('onLearningEvent', onLearningEvent, [event, req], { event });
   };
 
   return async (req, res, next) => {
-    if (skip && skip(req)) return next();
+    if (skip) {
+      try {
+        const skipResult = skip(req);
+        const shouldSkip = isPromiseLike(skipResult) ? await skipResult : skipResult;
+        if (shouldSkip) return next();
+      } catch (error) {
+        reportCallbackError(error, { hook: 'skip' });
+      }
+    }
 
     const ip = getIp(req);
-    const rateLimitKey = String(rateLimitKeyGetter(req) || ip || 'unknown');
+    const rateLimitKey = await safeRateLimitKey(req, ip);
     const sources = [];
     if (scanQuery) sources.push(['query', req.query]);
     if (scanBody) sources.push(['body', req.body]);
+    if (scanRawBody && req.rawBody !== undefined) sources.push(['rawBody', req.rawBody]);
     if (scanHeaders) sources.push(['headers', req.headers]);
     if (scanParams) sources.push(['params', req.params]);
     if (scanCookies) sources.push(['cookies', req.cookies]);
@@ -568,7 +651,7 @@ function expressMiddleware(options = {}) {
       req.sqlguardjsDetections = req.sqlguardjsDetections || [];
       req.sqlguardjsDetections.push(event);
       req.sqlguardjs = req.sqlguardjs || event;
-      if (onThreat) onThreat(event, req);
+      safeCall('onThreat', onThreat, [event, req], { event });
       writeLog(event);
       return { isMalicious: true, label: detection.label };
     };
@@ -584,29 +667,29 @@ function expressMiddleware(options = {}) {
         emitLearning(req, str, result, path);
         const suspiciousCount = rateLimiter.recordSuspicious(rateLimitKey);
         if (suspiciousCount >= maxSuspiciousRequests) {
-           isMalicious = true;
-           finalLabel = "rate_limit_escalation";
-           finalConfidence = threshold;
-           if (logger) logger(formatEvent({
-             type: 'sqlguardjs.rate_limit',
-             timestamp: new Date().toISOString(),
-             action: dryRun ? 'observe' : 'block',
-             blocked: !dryRun,
-             dryRun,
-             requestId: eventOptions.getRequestId(req),
-             method: req.method || null,
-             url: getRequestUrl(req),
-             route: getRoutePath(req),
-             ip: getIp(req),
-             label: finalLabel,
-             confidence: finalConfidence,
-             path,
-             matches: result.matches || [],
-             matchedSignalIds: (result.matches || []).map(match => match.id),
-             payloadPreview: payloadPreview(str, path, eventOptions),
-             payloadLength: String(str).length,
-             reason: 'repeated_suspicious_probe'
-           }, logFormat));
+          isMalicious = true;
+          finalLabel = "rate_limit_escalation";
+          finalConfidence = threshold;
+          writeLog({
+            type: 'sqlguardjs.rate_limit',
+            timestamp: new Date().toISOString(),
+            action: dryRun ? 'observe' : 'block',
+            blocked: !dryRun,
+            dryRun,
+            requestId: eventOptions.getRequestId(req),
+            method: req.method || null,
+            url: getRequestUrl(req),
+            route: getRoutePath(req),
+            ip: getIp(req),
+            label: finalLabel,
+            confidence: finalConfidence,
+            path,
+            matches: result.matches || [],
+            matchedSignalIds: (result.matches || []).map(match => match.id),
+            payloadPreview: payloadPreview(str, path, eventOptions),
+            payloadLength: String(str).length,
+            reason: 'repeated_suspicious_probe'
+          });
         }
       }
 

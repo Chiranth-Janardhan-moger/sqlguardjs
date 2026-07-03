@@ -111,7 +111,7 @@ Node.js 18 or newer is required.
 
 ## Express Usage
 
-Register SQLGuardJS after body parsers and before protected routes.
+Register SQLGuardJS after body parsers and before protected routes. SQLGuardJS scans data that Express has exposed on `req.query`, `req.body`, `req.headers`, `req.params`, `req.cookies`, and `req.rawBody`. It cannot inspect bytes that no upstream parser or capture middleware attaches to the request.
 
 ```javascript
 const express = require('express');
@@ -126,6 +126,7 @@ const guard = sqlguardjs({
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.text({ type: ['text/plain', 'application/*+json'], limit: '1mb' }));
 
 // Global scanner checks body, query, headers, and cookies.
 app.use(guard.global({ scanParams: false }));
@@ -149,6 +150,25 @@ app.post('/login', guard.route({
 
 app.listen(3000);
 ```
+
+For webhook or custom-parser endpoints that parse the raw stream later, capture the raw body before SQLGuardJS and expose it as `req.rawBody`:
+
+```javascript
+app.use((req, res, next) => {
+  let rawBody = '';
+  req.setEncoding('utf8');
+  req.on('data', chunk => { rawBody += chunk; });
+  req.on('end', () => {
+    req.rawBody = rawBody;
+    next();
+  });
+  req.on('error', next);
+});
+
+app.use(guard.global());
+```
+
+For multipart endpoints, run your multipart parser or raw-body capture before SQLGuardJS if you need form fields inspected. File contents should usually be validated by file-specific controls, not by this request scanner.
 
 You can also use `secureRouter()` when you want the router to handle both global request scanning and route-level parameter/schema checks automatically:
 
@@ -206,6 +226,9 @@ app.use(guard.global({
       requestId: event.requestId,
       ip: req.ip
     });
+  },
+  onCallbackError(error, context) {
+    console.error('SQLGuardJS callback failed', context);
   }
 }));
 ```
@@ -213,6 +236,7 @@ app.use(guard.global({
 If your app runs on Render, Railway, Fly.io, AWS, Azure, GCP, Docker, PM2, or a VPS, these events appear wherever your normal Node logs go. For a dashboard, pass `onThreat` and store the event in your database, logging platform, SIEM, or alerting system.
 
 Use `logFormat: 'json'` for production log ingestion. Text logs escape carriage returns and newlines, but structured JSON is safer for line-oriented log parsers and SIEM pipelines.
+Failures thrown by `logAttacks`, `onThreat`, and `onLearningEvent` are isolated from request handling. Use `onCallbackError` to monitor logging, alerting, or review-queue failures.
 
 After reviewing logs and tuning any route exclusions, enable blocking.
 
@@ -346,6 +370,7 @@ Example result:
 | `logAttacks` | `false` | `true` logs to `console.warn`; a function receives the formatted log message. |
 | `logFormat` | `text` | Use `json` to send structured events to `logAttacks`; recommended for production log pipelines. |
 | `onThreat` | `undefined` | Callback receiving `(event, req)` for detections. |
+| `onCallbackError` | `undefined` | Callback receiving `(error, context)` when a user hook fails. Hook failures are swallowed after reporting. |
 | `learning` | `false` | Records suspicious allowed payloads without changing detector behavior. |
 | `onLearningEvent` | `undefined` | Callback receiving learning candidates for human review. |
 | `blockStatus` | `403` | HTTP status code used for blocked requests. |
@@ -357,6 +382,7 @@ Example result:
 | `scanParams` | `true` | Scan `req.params`. |
 | `scanQuery` | `true` | Scan `req.query`. |
 | `scanBody` | `true` | Scan `req.body`. |
+| `scanRawBody` | `true` | Scan `req.rawBody` when an upstream parser or capture middleware provides it. |
 | `scanKeys` | `true` | Scan object keys as well as values. |
 | `maxDepth` | `20` | Maximum object nesting depth before the request is treated as a DoS probe. |
 | `maxFields` | `1000` | Maximum object fields scanned per request before the request is treated as a DoS probe. |
@@ -419,7 +445,7 @@ Current result:
 
 ```text
 Test Suites: 9 passed, 9 total
-Tests: 85 passed, 85 total
+Tests: 97 passed, 97 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

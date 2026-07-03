@@ -44,6 +44,12 @@ export interface SqlGuardJSEvent {
   reason: string | null;
 }
 
+export interface SqlGuardJSRateLimitEvent extends Omit<SqlGuardJSEvent, 'type'> {
+  type: 'sqlguardjs.rate_limit';
+}
+
+export type SqlGuardJSLogEvent = SqlGuardJSEvent | SqlGuardJSRateLimitEvent;
+
 export interface SqlGuardJSLearningEvent {
   type: 'sqlguardjs.learning';
   timestamp: string;
@@ -60,6 +66,16 @@ export interface SqlGuardJSLearningEvent {
   clusterKey: string;
   payloadPreview: string;
   payloadLength: number;
+}
+
+export interface SqlGuardJSCallbackErrorContext {
+  type: 'sqlguardjs.callback_error';
+  timestamp: string;
+  hook: string;
+  message: string;
+  eventType: string | null;
+  eventLabel: ThreatLabel | null;
+  eventPath: string | null;
 }
 
 export interface SchemaRule {
@@ -81,7 +97,7 @@ export interface RouteSchema {
 
 export interface LearningOptions {
   enabled?: boolean;
-  onEvent?: (event: SqlGuardJSLearningEvent, req: any) => void;
+  onEvent?: (event: SqlGuardJSLearningEvent, req: any) => void | Promise<void>;
 }
 
 export interface ExpressMiddlewareOptions {
@@ -90,22 +106,24 @@ export interface ExpressMiddlewareOptions {
   rateLimitWindowMs?: number;
   maxSuspiciousRequests?: number;
   maxRateLimitCapacity?: number;
-  rateLimitKey?: (req: any) => string | null | undefined;
+  rateLimitKey?: (req: any) => string | null | undefined | Promise<string | null | undefined>;
   dryRun?: boolean;
-  logAttacks?: boolean | ((messageOrEvent: string | SqlGuardJSEvent, event?: SqlGuardJSEvent) => void);
+  logAttacks?: boolean | ((messageOrEvent: string | SqlGuardJSLogEvent, event?: SqlGuardJSLogEvent) => void | Promise<void>);
   logFormat?: 'text' | 'json';
   jsonLogs?: boolean;
-  onThreat?: (event: SqlGuardJSEvent, req: any) => void;
-  onLearningEvent?: (event: SqlGuardJSLearningEvent, req: any) => void;
+  onThreat?: (event: SqlGuardJSEvent, req: any) => void | Promise<void>;
+  onLearningEvent?: (event: SqlGuardJSLearningEvent, req: any) => void | Promise<void>;
+  onCallbackError?: (error: unknown, context: SqlGuardJSCallbackErrorContext) => void | Promise<void>;
   learning?: boolean | LearningOptions;
   blockStatus?: number;
-  skip?: (req: any) => boolean;
+  skip?: (req: any) => boolean | Promise<boolean>;
   scanQuery?: boolean;
   scanBody?: boolean;
   scanHeaders?: boolean;
   scanCookies?: boolean;
   scanParams?: boolean;
   scanKeys?: boolean;
+  scanRawBody?: boolean;
   maxDepth?: number;
   maxFields?: number;
   maxPayloadLength?: number;
