@@ -18,6 +18,14 @@ Options:
 `);
 }
 
+function csvCell(value) {
+  const text = String(value)
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+  const formulaSafeText = /^[\t ]*[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${formulaSafeText.replace(/"/g, '""')}"`;
+}
+
 function main() {
   const { values, positionals } = util.parseArgs({ 
     args: process.argv.slice(2), 
@@ -49,7 +57,7 @@ function main() {
     
     if (format === 'csv') {
       console.log('payload,label,confidence');
-      console.log(`"${payload.replace(/"/g, '""')}","${result.label}",${result.confidence}`);
+      console.log(`${csvCell(payload)},${csvCell(result.label)},${result.confidence}`);
     } else {
       console.log(JSON.stringify({ payload, result }, null, 2));
     }
@@ -75,7 +83,7 @@ function main() {
     if (format === 'csv') {
       console.log('payload,label,confidence');
       results.forEach(r => {
-        console.log(`"${r.payload.replace(/"/g, '""')}","${r.result.label}",${r.result.confidence}`);
+        console.log(`${csvCell(r.payload)},${csvCell(r.result.label)},${r.result.confidence}`);
       });
     } else {
       console.log(JSON.stringify(results, null, 2));

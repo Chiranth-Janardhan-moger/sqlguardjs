@@ -140,6 +140,8 @@ sqlguardjs scan "1 UNION/**/SELECT password FROM users--"
 sqlguardjs scan-file payloads.txt --format csv
 ```
 
+CSV output escapes row-breaking newlines and prefixes spreadsheet-formula-leading cells for safer analyst reports.
+
 This package is defense in depth. Keep using parameterized queries, safe ORM APIs, context-aware output encoding, HTML sanitization, CSP, and least-privilege database accounts.
 
 Full documentation lives in the repository root README.

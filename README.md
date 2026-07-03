@@ -419,6 +419,7 @@ sqlguardjs scan-file payloads.txt --format csv
 ```
 
 JSON is the default output. CSV output includes `payload,label,confidence`.
+CSV output escapes row-breaking newlines and prefixes spreadsheet-formula-leading cells so attacker payloads cannot forge report rows or execute when opened in spreadsheet tools.
 
 ## Security Guidance
 
@@ -445,7 +446,7 @@ Current result:
 
 ```text
 Test Suites: 9 passed, 9 total
-Tests: 97 passed, 97 total
+Tests: 115 passed, 115 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

@@ -56,4 +56,32 @@ describe('CLI scanner', () => {
       fs.rmSync(filePath, { force: true });
     }
   });
+
+  it('sanitizes formula-leading payloads in CSV output', () => {
+    const output = execFileSync(process.execPath, [
+      cliPath,
+      'scan',
+      '=HYPERLINK("http://evil.test","click")',
+      '--format',
+      'csv'
+    ], { encoding: 'utf8' });
+
+    expect(output).toContain('payload,label,confidence');
+    expect(output).toContain('"\'=HYPERLINK(""http://evil.test"",""click"")","benign",0');
+  });
+
+  it('escapes newlines in CSV output so payloads cannot forge rows', () => {
+    const output = execFileSync(process.execPath, [
+      cliPath,
+      'scan',
+      "1' OR '1'='1\nforged,benign,0",
+      '--format',
+      'csv'
+    ], { encoding: 'utf8' });
+    const rows = output.trim().split(/\r?\n/);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toContain("\\nforged,benign,0");
+    expect(rows[1]).not.toContain('\nforged');
+  });
 });

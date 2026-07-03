@@ -16,10 +16,17 @@ const SQL_CONSTANT_VALUE = '(?:\\d+(?:\\.\\d+)?|N?[\'"][^\'"]{0,80}[\'"]?|NULL)'
 const SQL_VALUE = '(?:\\d+(?:\\.\\d+)?|N?[\'"][^\'"]{0,80}[\'"]?|[A-Za-z_][\\w.]*|NULL)';
 const SQL_CONSTANT_COMPARISON_EXPRESSION = `${SQL_CONSTANT_VALUE}\\s*${SQL_COMPARISON_OPERATOR}\\s*${SQL_CONSTANT_VALUE}`;
 const SQL_COMPARISON_EXPRESSION = `${SQL_VALUE}\\s*${SQL_COMPARISON_OPERATOR}\\s*${SQL_VALUE}`;
+const SQL_BETWEEN_EXPRESSION = `${SQL_VALUE}\\s+BETWEEN\\s+${SQL_VALUE}\\s+AND\\s+${SQL_VALUE}`;
+const SQL_IS_EXPRESSION = `${SQL_VALUE}\\s+IS\\s+(?:NOT\\s+)?NULL`;
+const SQL_EXISTS_EXPRESSION = `EXISTS\\s*\\(\\s*SELECT\\b`;
+const SQL_BOOLEAN_LITERAL_EXPRESSION = '(?:TRUE|FALSE|UNKNOWN|NULL)';
+const SQL_BOOLEAN_EXPRESSION = `(?:${SQL_COMPARISON_EXPRESSION}|${SQL_BETWEEN_EXPRESSION}|${SQL_IS_EXPRESSION}|${SQL_EXISTS_EXPRESSION}|${SQL_BOOLEAN_LITERAL_EXPRESSION})`;
+const SQL_CONSTANT_BOOLEAN_EXPRESSION = `(?:${SQL_CONSTANT_COMPARISON_EXPRESSION}|${SQL_BETWEEN_EXPRESSION}|${SQL_IS_EXPRESSION}|${SQL_EXISTS_EXPRESSION}|${SQL_BOOLEAN_LITERAL_EXPRESSION})`;
 const HTTP_METHODS = ['all', 'get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
 const DEFAULT_REDACT_KEYS = ['password', 'passwd', 'pwd', 'token', 'secret', 'authorization', 'cookie', 'api_key', 'apikey'];
 
 const sqlWord = (word) => word.split('').join('[\\s\\u00a0]*');
+const unionSelectPattern = (wordBuilder = word => word) => `\\b${wordBuilder('UNION')}(?:\\s+(?:${wordBuilder('ALL')}|${wordBuilder('DISTINCT')})\\s+|\\s+|\\s*\\(\\s*)${wordBuilder('SELECT')}\\b`;
 
 function hasRepeatedQuotedLiteralComparison(value) {
   const comparison = /(['"])([^'"]{1,80})\1\s*=\s*(['"])([^'"]{1,80})\3/g;
@@ -207,7 +214,21 @@ function validateSchemaSource(sourceName, source, rule) {
   const normalized = normalizeSchemaRule(rule);
   if (!normalized || !source || typeof source !== 'object' || Buffer.isBuffer(source)) return null;
 
-  const keys = Object.keys(source);
+  let keys;
+  try {
+    keys = Object.keys(source);
+  } catch (_) {
+    return {
+      payload: `[Unreadable ${sourceName}]`,
+      detection: {
+        label: 'schema_violation',
+        confidence: 1,
+        path: sourceName,
+        reason: 'unreadable_object',
+        matches: [{ id: 'schema-unreadable-object', label: 'schema', confidence: 1 }]
+      }
+    };
+  }
   const allowed = new Set(normalized.allowed);
   const required = new Set(normalized.required);
 
@@ -265,12 +286,12 @@ class Detector {
       {
         id: 'union-select',
         confidence: 0.8,
-        pattern: /\bUNION\s+(?:ALL\s+)?SELECT\b/i
+        pattern: new RegExp(unionSelectPattern(), 'i')
       },
       {
         id: 'comment-fragmented-union-select',
         confidence: 0.8,
-        pattern: new RegExp(`\\b${sqlWord('UNION')}\\s+(?:${sqlWord('ALL')}\\s+)?${sqlWord('SELECT')}\\b`, 'i')
+        pattern: new RegExp(unionSelectPattern(sqlWord), 'i')
       },
       {
         id: 'mysql-versioned-comment',
@@ -280,7 +301,7 @@ class Detector {
       {
         id: 'boolean-tautology',
         confidence: 0.75,
-        pattern: new RegExp(`['"\`)]\\s*${SQL_BOOLEAN_OPERATOR}\\s+${SQL_COMPARISON_EXPRESSION}|${SQL_SYMBOL_BOOLEAN_OPERATOR}\\s+${SQL_COMPARISON_EXPRESSION}|\\b${SQL_WORD_BOOLEAN_OPERATOR}\\b\\s+${SQL_CONSTANT_COMPARISON_EXPRESSION}|\\b\\d+\\s+\\b${SQL_WORD_BOOLEAN_OPERATOR}\\b\\s+${SQL_CONSTANT_COMPARISON_EXPRESSION}`, 'i')
+        pattern: new RegExp(`['"\`)]\\s*${SQL_BOOLEAN_OPERATOR}\\s+(?:NOT\\s+)?${SQL_BOOLEAN_EXPRESSION}|${SQL_SYMBOL_BOOLEAN_OPERATOR}\\s+(?:NOT\\s+)?${SQL_BOOLEAN_EXPRESSION}|\\b${SQL_WORD_BOOLEAN_OPERATOR}\\b\\s+(?:NOT\\s+)?${SQL_CONSTANT_BOOLEAN_EXPRESSION}|\\b\\d+\\s+\\b${SQL_WORD_BOOLEAN_OPERATOR}\\b\\s+(?:NOT\\s+)?${SQL_CONSTANT_BOOLEAN_EXPRESSION}`, 'i')
       },
       {
         id: 'drop-table',
@@ -414,10 +435,17 @@ class Detector {
       const code = parseInt(hex || dec, hex ? 16 : 10);
       return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : match;
     };
+    const decodeCodePoint = (match, hex) => {
+      const code = parseInt(hex, 16);
+      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    };
 
     const normalize = (value) => {
       let normalized = value
         .replace(/%u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, decodeCodePoint)
+        .replace(/\\u([0-9a-fA-F]{4})/g, decodeCodePoint)
+        .replace(/\\x([0-9a-fA-F]{2})/g, decodeCodePoint)
         .replace(/&#x([0-9a-fA-F]+);?|&#(\d+);?/g, decodeEntity)
         .replace(/&([a-zA-Z][a-zA-Z0-9]+);/g, (match, name) => namedEntities[name.toLowerCase()] ?? match)
         .replace(/[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/g, ' ')
@@ -636,13 +664,6 @@ function expressMiddleware(options = {}) {
 
     const ip = getIp(req);
     const rateLimitKey = await safeRateLimitKey(req, ip);
-    const sources = [];
-    if (scanQuery) sources.push(['query', req.query]);
-    if (scanBody) sources.push(['body', req.body]);
-    if (scanRawBody && req.rawBody !== undefined) sources.push(['rawBody', req.rawBody]);
-    if (scanHeaders) sources.push(['headers', req.headers]);
-    if (scanParams) sources.push(['params', req.params]);
-    if (scanCookies) sources.push(['cookies', req.cookies]);
     
     let scannedFields = 0;
 
@@ -712,14 +733,40 @@ function expressMiddleware(options = {}) {
       if (seen.has(obj)) return false;
       seen.add(obj);
       let attackFound = false;
+      let keys;
 
-      for (const [key, val] of Object.entries(obj)) {
+      try {
+        keys = Object.keys(obj);
+      } catch (_) {
+        return reportDetection("[Object Enumeration Failed]", {
+          label: "dos",
+          confidence: 1,
+          path,
+          reason: 'object_enumeration_failed',
+          matches: [{ id: 'object-enumeration-failed', label: 'dos', confidence: 1 }]
+        });
+      }
+
+      for (const key of keys) {
         scannedFields++;
         if (scannedFields > maxFields) {
           return reportDetection("[Field Limit Exceeded]", { label: "dos", confidence: 1, path, reason: 'max_fields_exceeded' });
         }
 
         const childPath = Array.isArray(obj) ? `${path}[${key}]` : `${path}.${key}`;
+        let val;
+        try {
+          val = obj[key];
+        } catch (_) {
+          return reportDetection("[Object Property Access Failed]", {
+            label: "dos",
+            confidence: 1,
+            path: childPath,
+            reason: 'object_property_access_failed',
+            matches: [{ id: 'object-property-access-failed', label: 'dos', confidence: 1 }]
+          });
+        }
+
         const keyAttack = scanKeys ? await scanString(key, `${childPath}.__key`) : false;
         if (keyAttack) {
           if (!dryRun) return keyAttack;
@@ -749,9 +796,59 @@ function expressMiddleware(options = {}) {
       return attackFound;
     };
 
-    const schemaResult = validateSchema(req, resolveSchema(req, options));
+    let schemaResult;
+    try {
+      schemaResult = validateSchema(req, resolveSchema(req, options));
+    } catch (_) {
+      schemaResult = {
+        payload: '[Schema Source Read Failed]',
+        detection: {
+          label: 'dos',
+          confidence: 1,
+          path: 'schema',
+          reason: 'schema_source_read_failed',
+          matches: [{ id: 'schema-source-read-failed', label: 'dos', confidence: 1 }]
+        }
+      };
+    }
+
     if (schemaResult) {
       const attack = reportDetection(schemaResult.payload, schemaResult.detection);
+      if (!dryRun) return res.status(blockStatus).json({
+        error: 'Forbidden',
+        message: 'Malicious payload detected by SQLGuardJS',
+        details: { label: attack.label }
+      });
+    }
+
+    const sources = [];
+    const sourceReadFailures = [];
+    const addSource = (enabled, sourceName, readSource, options = {}) => {
+      if (!enabled) return;
+      try {
+        const source = readSource();
+        if (options.skipUndefined && source === undefined) return;
+        sources.push([sourceName, source]);
+      } catch (_) {
+        sourceReadFailures.push(sourceName);
+      }
+    };
+
+    addSource(scanQuery, 'query', () => req.query);
+    addSource(scanBody, 'body', () => req.body);
+    addSource(scanRawBody, 'rawBody', () => req.rawBody, { skipUndefined: true });
+    addSource(scanHeaders, 'headers', () => req.headers);
+    addSource(scanParams, 'params', () => req.params);
+    addSource(scanCookies, 'cookies', () => req.cookies);
+
+    for (const sourceName of sourceReadFailures) {
+      const attack = reportDetection(`[${sourceName} Source Read Failed]`, {
+        label: 'dos',
+        confidence: 1,
+        path: sourceName,
+        reason: 'source_read_failed',
+        matches: [{ id: 'source-read-failed', label: 'dos', confidence: 1 }]
+      });
       if (!dryRun) return res.status(blockStatus).json({
         error: 'Forbidden',
         message: 'Malicious payload detected by SQLGuardJS',
