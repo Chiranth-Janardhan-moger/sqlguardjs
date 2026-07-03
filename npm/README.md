@@ -62,7 +62,7 @@ Express does not populate `req.params` until after a route is matched.
 
 ## Performance
 
-SQLGuard ML scans decoded request data in memory and avoids network calls unless you configure `mlEndpoint`. For typical small API requests, the heuristic scan is designed to add very low overhead. Actual latency depends on payload size, nesting depth, logging, schema checks, and external ML calls.
+SQLGuard ML scans decoded request data in memory and avoids network calls unless you configure `mlEndpoint`. In heuristic mode, it does not call a database or external service. Actual latency depends on payload size, nesting depth, logging, schema checks, and external ML calls.
 
 ## Secure router
 

@@ -6,7 +6,7 @@
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
-SQLGuard ML is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides a fast heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, and an optional HTTP bridge for a second-opinion model.
+SQLGuard ML is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides an in-process heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, and an optional HTTP bridge for a second-opinion model.
 
 SQLGuard ML is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
 
@@ -87,7 +87,7 @@ Use both when you want all common request inputs inspected before your route log
 
 ## Performance
 
-SQLGuard ML scans decoded request data in memory and avoids network calls unless you explicitly configure `mlEndpoint`. For typical small API requests, the heuristic scan is designed to add very low overhead. Actual latency depends on payload size, nesting depth, enabled logging, schema checks, and whether you call an external ML service.
+SQLGuard ML scans decoded request data in memory and avoids network calls unless you explicitly configure `mlEndpoint`. In heuristic mode, it does not call a database or external service. Actual latency depends on payload size, nesting depth, enabled logging, schema checks, and whether you call an external ML service.
 
 Default limits such as `maxPayloadLength`, `maxDepth`, `maxFields`, and `maxMlCalls` are included to keep worst-case request processing bounded.
 
@@ -382,15 +382,18 @@ JSON is the default output. CSV output includes `payload,label,confidence`.
 
 The Node package works without Python. If you want a second opinion for suspicious-but-not-blocked payloads, run your own HTTP model endpoint and pass its URL as `mlEndpoint`.
 
+The Python bridge is source-only in this repository. It is not published to PyPI as `sqlguard-ml`.
+
 Development stub:
 
 ```bash
 cd python
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .
+python -m pip install fastapi uvicorn scikit-learn
+$env:PYTHONPATH = "$PWD\src"
 python src/sqlguard_ml/train_stub.py
-uvicorn sqlguard_ml.api:app --port 8000
+python -m uvicorn sqlguard_ml.api:app --port 8000
 ```
 
 Then configure:
@@ -399,7 +402,7 @@ Then configure:
 app.use(guard.global({
   threshold: 0.6,
   suspiciousThreshold: 0.2,
-  mlEndpoint: 'http://127.0.0.1:8000/api/detect'
+  mlEndpoint: 'http://127.0.0.1:8000/api/v1/detect'
 }));
 ```
 
