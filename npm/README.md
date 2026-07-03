@@ -1,33 +1,54 @@
 # SQLGuard ML for Node.js
 
-Express request verification, middleware, and CLI scanning for common SQL injection, NoSQL injection, and XSS payloads.
+Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
+
+SQLGuard ML is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads.
+
+## 30-Second Quick Start
 
 ```bash
 npm install sqlguard-ml
 ```
-
-## Express verifier API
 
 ```javascript
 const express = require('express');
 const { sqlguard } = require('sqlguard-ml');
 
 const app = express();
-const guard = sqlguard({
-  threshold: 0.5,
-  suspiciousThreshold: 0.2,
-  logAttacks: true
-});
+const guard = sqlguard();
 
-app.use(express.json({ limit: '1mb' }));
-app.use(guard.global({ scanParams: false }));
+app.use(express.json());
+app.use(guard.global());
 
-app.get('/users/:id', guard.route(), (req, res) => {
-  res.json({ id: req.params.id });
+app.post('/login', guard.route(), (req, res) => {
+  res.json({ ok: true });
 });
 ```
 
-`guard.global()` checks body, query, headers, and cookies before routes. `guard.route()` checks `req.params` after Express resolves a route.
+## Before and After
+
+Without SQLGuard ML:
+
+```text
+Attacker -> Express route -> Application logic -> Database or HTML rendering
+```
+
+With SQLGuard ML:
+
+```text
+Attacker -> SQLGuard ML -> Blocked with 403 or passed to Express route
+```
+
+## Why `global()` and `route()` both exist
+
+Express does not populate `req.params` until after a route is matched.
+
+- `guard.global()` checks body, query, headers, and cookies before routes.
+- `guard.route()` checks `req.params` and optional schemas after Express resolves a route.
+
+## Performance
+
+SQLGuard ML scans decoded request data in memory and avoids network calls unless you configure `mlEndpoint`. For typical small API requests, the heuristic scan is designed to add very low overhead. Actual latency depends on payload size, nesting depth, logging, schema checks, and external ML calls.
 
 ## Secure router
 

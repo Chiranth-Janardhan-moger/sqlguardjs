@@ -1,8 +1,83 @@
 # SQLGuard ML
 
-SQLGuard ML is a Node.js and Express request-inspection package for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides a fast heuristic detector, Express middleware, a command-line scanner, and an optional HTTP bridge for a second-opinion model.
+Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
+
+SQLGuard ML is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides a fast heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, and an optional HTTP bridge for a second-opinion model.
 
 SQLGuard ML is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
+
+## 30-Second Quick Start
+
+Install:
+
+```bash
+npm install sqlguard-ml
+```
+
+Use:
+
+```javascript
+const express = require('express');
+const { sqlguard } = require('sqlguard-ml');
+
+const app = express();
+const guard = sqlguard();
+
+app.use(express.json());
+app.use(guard.global());
+
+app.post('/login', guard.route(), (req, res) => {
+  res.json({ ok: true });
+});
+```
+
+For route schemas:
+
+```javascript
+app.post('/login', guard.route({
+  schema: {
+    body: {
+      allowed: ['email', 'password'],
+      required: ['email', 'password']
+    },
+    query: []
+  }
+}), loginHandler);
+```
+
+## Before and After
+
+Without SQLGuard ML:
+
+```text
+Attacker
+  -> Express route
+  -> Application logic
+  -> Database or HTML rendering
+```
+
+With SQLGuard ML:
+
+```text
+Attacker
+  -> SQLGuard ML
+  -> Blocked with 403 or passed to Express route
+```
+
+## Why `global()` and `route()` both exist
+
+Express does not populate `req.params` until after a route is matched. SQLGuard ML therefore provides two guard points:
+
+- `guard.global()` scans request bodies, query strings, headers, and cookies before route handlers run.
+- `guard.route()` scans `req.params` and applies optional route schemas after Express resolves the route.
+
+Use both when you want all common request inputs inspected before your route logic runs.
+
+## Performance
+
+SQLGuard ML scans decoded request data in memory and avoids network calls unless you explicitly configure `mlEndpoint`. For typical small API requests, the heuristic scan is designed to add very low overhead. Actual latency depends on payload size, nesting depth, enabled logging, schema checks, and whether you call an external ML service.
+
+Default limits such as `maxPayloadLength`, `maxDepth`, `maxFields`, and `maxMlCalls` are included to keep worst-case request processing bounded.
 
 ## Features
 
@@ -15,12 +90,6 @@ SQLGuard ML is a defense-in-depth control. It does not replace parameterized SQL
 - Supports a secure router API with `sqlguard().global()`, `sqlguard().route()`, and `secureRouter()`.
 - Supports weighted confidence scoring, suspicious request escalation, schema-aware route checks, safe learning events, dry-run rollout, route skipping, structured admin logs, and request-size safety limits.
 - Includes TypeScript definitions and real Express integration tests.
-
-## Installation
-
-```bash
-npm install sqlguard-ml
-```
 
 Node.js 18 or newer is required.
 
@@ -187,7 +256,7 @@ Use learning events for review, clustering, and regression-test creation. Do not
 Defaults:
 
 ```javascript
-expressMiddleware({
+guard.global({
   threshold: 0.5,
   suspiciousThreshold: 0.2
 });
@@ -315,7 +384,7 @@ uvicorn sqlguard_ml.api:app --port 8000
 Then configure:
 
 ```javascript
-app.use(expressMiddleware({
+app.use(guard.global({
   threshold: 0.6,
   suspiciousThreshold: 0.2,
   mlEndpoint: 'http://127.0.0.1:8000/api/detect'
@@ -348,7 +417,7 @@ It also includes real Express integration tests with `supertest` for query, body
 Current result:
 
 ```text
-Test Suites: 8 passed, 8 total
+Test Suites: 9 passed, 9 total
 Tests: 50 passed, 50 total
 ```
 
