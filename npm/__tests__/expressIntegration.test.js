@@ -1,11 +1,11 @@
 const express = require('express');
 const request = require('supertest');
-const { expressMiddleware, secureRouter, sqlguard } = require('../src/detector');
+const { expressMiddleware, secureRouter, sqlguardjs } = require('../src/detector');
 
 describe('Express integration', () => {
   it('blocks route params after Express resolves them', async () => {
     const app = express();
-    const guard = sqlguard();
+    const guard = sqlguardjs();
 
     app.use(guard.global({ scanParams: false }));
     app.get('/users/:id', guard.route(), (req, res) => {
@@ -88,7 +88,7 @@ describe('Express integration', () => {
 
     expect(logs).toHaveLength(1);
     expect(logs[0]).toEqual(expect.objectContaining({
-      type: 'sqlguard.threat',
+      type: 'sqlguardjs.threat',
       requestId: 'req-123',
       method: 'POST',
       url: '/login',
@@ -117,7 +117,7 @@ describe('Express integration', () => {
 
     expect(learningEvents).toHaveLength(1);
     expect(learningEvents[0]).toEqual(expect.objectContaining({
-      type: 'sqlguard.learning',
+      type: 'sqlguardjs.learning',
       label: 'xss',
       path: 'query.next'
     }));

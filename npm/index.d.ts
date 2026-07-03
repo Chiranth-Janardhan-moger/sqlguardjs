@@ -23,8 +23,8 @@ export interface DetectionResult {
   matches: DetectionMatch[];
 }
 
-export interface SqlGuardEvent {
-  type: 'sqlguard.threat';
+export interface SqlGuardJSEvent {
+  type: 'sqlguardjs.threat';
   timestamp: string;
   action: 'block' | 'observe' | string;
   blocked: boolean;
@@ -44,8 +44,8 @@ export interface SqlGuardEvent {
   reason: string | null;
 }
 
-export interface SqlGuardLearningEvent {
-  type: 'sqlguard.learning';
+export interface SqlGuardJSLearningEvent {
+  type: 'sqlguardjs.learning';
   timestamp: string;
   requestId: string | null;
   method: string | null;
@@ -81,7 +81,7 @@ export interface RouteSchema {
 
 export interface LearningOptions {
   enabled?: boolean;
-  onEvent?: (event: SqlGuardLearningEvent, req: any) => void;
+  onEvent?: (event: SqlGuardJSLearningEvent, req: any) => void;
 }
 
 export interface ExpressMiddlewareOptions {
@@ -91,11 +91,11 @@ export interface ExpressMiddlewareOptions {
   maxSuspiciousRequests?: number;
   maxRateLimitCapacity?: number;
   dryRun?: boolean;
-  logAttacks?: boolean | ((messageOrEvent: string | SqlGuardEvent, event?: SqlGuardEvent) => void);
+  logAttacks?: boolean | ((messageOrEvent: string | SqlGuardJSEvent, event?: SqlGuardJSEvent) => void);
   logFormat?: 'text' | 'json';
   jsonLogs?: boolean;
-  onThreat?: (event: SqlGuardEvent, req: any) => void;
-  onLearningEvent?: (event: SqlGuardLearningEvent, req: any) => void;
+  onThreat?: (event: SqlGuardJSEvent, req: any) => void;
+  onLearningEvent?: (event: SqlGuardJSLearningEvent, req: any) => void;
   learning?: boolean | LearningOptions;
   blockStatus?: number;
   skip?: (req: any) => boolean;
@@ -132,7 +132,7 @@ export class Detector {
   detect(payload: unknown): DetectionResult;
 }
 
-export interface SqlGuardInstance {
+export interface SqlGuardJSInstance {
   detector: Detector;
   global(overrides?: ExpressMiddlewareOptions): RequestHandler;
   route(overrides?: ExpressMiddlewareOptions): RequestHandler;
@@ -141,5 +141,5 @@ export interface SqlGuardInstance {
 }
 
 export function expressMiddleware(options?: ExpressMiddlewareOptions): RequestHandler;
-export function sqlguard(options?: ExpressMiddlewareOptions): SqlGuardInstance;
+export function sqlguardjs(options?: ExpressMiddlewareOptions): SqlGuardJSInstance;
 export function secureRouter(options?: SecureRouterOptions): any;

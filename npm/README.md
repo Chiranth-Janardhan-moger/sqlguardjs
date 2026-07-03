@@ -18,10 +18,10 @@ npm install sqlguardjs
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('sqlguardjs');
+const { sqlguardjs } = require('sqlguardjs');
 
 const app = express();
-const guard = sqlguard();
+const guard = sqlguardjs();
 
 app.use(express.json());
 app.use(guard.global());
@@ -122,8 +122,8 @@ Learning mode records suspicious allowed payloads for human review. It does not 
 ## CLI
 
 ```bash
-sqlguard scan "1 UNION/**/SELECT password FROM users--"
-sqlguard scan-file payloads.txt --format csv
+sqlguardjs scan "1 UNION/**/SELECT password FROM users--"
+sqlguardjs scan-file payloads.txt --format csv
 ```
 
 This package is defense in depth. Keep using parameterized queries, safe ORM APIs, context-aware output encoding, HTML sanitization, CSP, and least-privilege database accounts.

@@ -1,8 +1,8 @@
 const express = require('express');
-const { sqlguard } = require('sqlguardjs');
+const { sqlguardjs } = require('sqlguardjs');
 
 const app = express();
-const guard = sqlguard({
+const guard = sqlguardjs({
   threshold: 0.5,
   suspiciousThreshold: 0.2,
   logAttacks: true

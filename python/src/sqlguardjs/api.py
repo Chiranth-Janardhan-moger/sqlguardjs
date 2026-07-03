@@ -3,7 +3,7 @@ import joblib
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SQLGuard ML API (Stub)")
+app = FastAPI(title="SQLGuardJS API (Stub)")
 
 class DetectRequest(BaseModel):
     payload: str = Field(..., max_length=50000)

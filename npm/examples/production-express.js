@@ -23,13 +23,13 @@ const router = secureRouter({
   onThreat(event) {
     // Admins can persist this event in a database, send alerts, or increment metrics.
     // Payload previews are redacted for sensitive field names by default.
-    console.warn('sqlguard_threat', event.label, event.confidence, event.path);
+    console.warn('sqlguardjs_threat', event.label, event.confidence, event.path);
   },
   learning: {
     enabled: true,
     onEvent(event) {
       // Store for review. Do not automatically train on live traffic.
-      console.info('sqlguard_learning_candidate', event.clusterKey);
+      console.info('sqlguardjs_learning_candidate', event.clusterKey);
     }
   }
 });

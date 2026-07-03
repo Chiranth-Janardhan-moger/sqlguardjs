@@ -84,12 +84,12 @@ describe('Express middleware hardening options', () => {
 
     expect(res.status).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.sqlguard).toEqual(expect.objectContaining({
+    expect(req.sqlguardjs).toEqual(expect.objectContaining({
       detected: true,
       dryRun: true,
       label: 'sqli'
     }));
-    expect(onThreat).toHaveBeenCalledWith(req.sqlguard, req);
+    expect(onThreat).toHaveBeenCalledWith(req.sqlguardjs, req);
   });
 
   it('supports skip callbacks and custom block status codes', async () => {

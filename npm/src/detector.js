@@ -71,7 +71,7 @@ function createDetectionEvent(req, payload, detection, options = {}) {
   const matches = detection.matches || [];
   const action = options.dryRun ? 'observe' : (detection.action || 'block');
   return {
-    type: 'sqlguard.threat',
+    type: 'sqlguardjs.threat',
     detected: true,
     timestamp: new Date().toISOString(),
     action,
@@ -102,7 +102,7 @@ function createLearningEvent(req, payload, result, path, options = {}) {
   const matchedSignalIds = (result.matches || []).map(match => match.id);
   const fingerprint = payloadFingerprint(payload);
   return {
-    type: 'sqlguard.learning',
+    type: 'sqlguardjs.learning',
     timestamp: new Date().toISOString(),
     requestId: options.getRequestId(req),
     method: req.method || null,
@@ -484,8 +484,8 @@ function expressMiddleware(options = {}) {
   const emitLearning = (req, payload, result, path) => {
     if (!learningEnabled) return;
     const event = createLearningEvent(req, payload, result, path, eventOptions);
-    req.sqlguardLearning = req.sqlguardLearning || [];
-    req.sqlguardLearning.push(event);
+    req.sqlguardjsLearning = req.sqlguardjsLearning || [];
+    req.sqlguardjsLearning.push(event);
     if (onLearningEvent) onLearningEvent(event, req);
   };
 
@@ -504,7 +504,7 @@ function expressMiddleware(options = {}) {
 
     const reportDetection = (payload, detection) => {
       const event = createDetectionEvent(req, payload, detection, eventOptions);
-      req.sqlguard = event;
+      req.sqlguardjs = event;
       if (onThreat) onThreat(event, req);
       writeLog(event);
       return { isMalicious: true, label: detection.label };
@@ -525,7 +525,7 @@ function expressMiddleware(options = {}) {
            finalLabel = "rate_limit_escalation";
            finalConfidence = threshold;
            if (logger) logger(formatEvent({
-             type: 'sqlguard.rate_limit',
+             type: 'sqlguardjs.rate_limit',
              timestamp: new Date().toISOString(),
              action: dryRun ? 'observe' : 'block',
              blocked: !dryRun,
@@ -630,7 +630,7 @@ function mergeOptions(base, override) {
   return { ...base, ...(override || {}) };
 }
 
-function sqlguard(options = {}) {
+function sqlguardjs(options = {}) {
   const baseOptions = {
     ...options,
     detector: options.detector || new Detector({ maxPayloadLength: options.maxPayloadLength })
@@ -673,7 +673,7 @@ function secureRouter(options = {}) {
   }
 
   const router = express.Router(options.routerOptions || {});
-  const guard = sqlguard(options);
+  const guard = sqlguardjs(options);
   router.use(guard.global({ ...(options.globalOptions || {}), scanParams: false }));
 
   for (const method of HTTP_METHODS) {
@@ -699,4 +699,4 @@ function secureRouter(options = {}) {
   return router;
 }
 
-module.exports = { Detector, expressMiddleware, sqlguard, secureRouter };
+module.exports = { Detector, expressMiddleware, sqlguardjs, secureRouter };

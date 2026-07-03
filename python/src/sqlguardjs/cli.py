@@ -4,7 +4,7 @@ import json
 from .detector import PayloadDetector
 
 def main():
-    parser = argparse.ArgumentParser(description="SQLGuard ML CLI")
+    parser = argparse.ArgumentParser(description="SQLGuardJS CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     detect_parser = subparsers.add_parser("detect", help="Detect attack in a single payload")

@@ -1,11 +1,11 @@
 {
   "name": "sqlguardjs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Express middleware and CLI scanner for SQL injection, NoSQL injection, and XSS payloads",
   "main": "src/detector.js",
   "types": "index.d.ts",
   "bin": {
-    "sqlguard": "bin/sqlguard.js"
+    "sqlguardjs": "bin/sqlguardjs.js"
   },
   "keywords": [
     "security",

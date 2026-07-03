@@ -7,11 +7,11 @@ const { Detector } = require('../src/detector');
 
 function printHelp() {
   console.log(`
-SQLGuard (Heuristic Scanner)
+SQLGuardJS (Heuristic Scanner)
 
 Usage:
-  sqlguard scan <payload>                - Scan a single payload
-  sqlguard scan-file <filepath>          - Scan a file with one payload per line
+  sqlguardjs scan <payload>              - Scan a single payload
+  sqlguardjs scan-file <filepath>        - Scan a file with one payload per line
   
 Options:
   --format <json|csv>                    - Output format (default: json)

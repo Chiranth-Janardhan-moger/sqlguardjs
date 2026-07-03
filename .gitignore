@@ -1,5 +1,6 @@
 # Root gitignore
 node_modules/
+.supergoal/
 __pycache__/
 *.pyc
 .env

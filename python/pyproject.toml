@@ -3,9 +3,9 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sqlguard_ml"
-version = "1.1.2"
-description = "TensorFlow SQLi/XSS detector"
+name = "sqlguardjs"
+version = "1.0.1"
+description = "SQLGuardJS Python reference detector"
 dependencies = [
     "tensorflow",
     "keras>=3.15.0",
@@ -20,5 +20,5 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 
 [project.scripts]
-sqlguard = "sqlguard_ml.cli:main"
+sqlguardjs = "sqlguardjs.cli:main"
 

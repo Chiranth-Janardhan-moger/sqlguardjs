@@ -5,10 +5,10 @@ describe('package metadata', () => {
     expect(pkg.engines.node).toBe('>=18.0.0');
   });
 
-  it('should publish under the clean sqlguard package name', () => {
+  it('should publish under the clean sqlguardjs package name', () => {
     expect(pkg.name).toBe('sqlguardjs');
-    expect(pkg.version).toBe('1.0.0');
-    expect(pkg.bin.sqlguard).toBe('bin/sqlguard.js');
+    expect(pkg.version).toBe('1.0.1');
+    expect(pkg.bin.sqlguardjs).toBe('bin/sqlguardjs.js');
   });
 
   it('should publish runtime files only', () => {

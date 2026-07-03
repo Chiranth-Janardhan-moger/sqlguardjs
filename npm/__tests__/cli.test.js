@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const cliPath = path.join(__dirname, '..', 'bin', 'sqlguard.js');
+const cliPath = path.join(__dirname, '..', 'bin', 'sqlguardjs.js');
 
 describe('CLI scanner', () => {
   it('scans a single adversarial payload as JSON', () => {
@@ -19,7 +19,7 @@ describe('CLI scanner', () => {
   });
 
   it('scans payload files and emits CSV', () => {
-    const filePath = path.join(os.tmpdir(), `sqlguard-cli-${process.pid}.txt`);
+    const filePath = path.join(os.tmpdir(), `sqlguardjs-cli-${process.pid}.txt`);
     fs.writeFileSync(filePath, [
       'hello world',
       '<script>alert(1)</script>'

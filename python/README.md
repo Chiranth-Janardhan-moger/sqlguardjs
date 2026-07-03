@@ -1,10 +1,10 @@
-# SQLGuardjs: Model Training & Prediction
+# SQLGuardJS: Model Training & Prediction
 
 ## How to run it
 
 Open a terminal in the project root:
 ```bash
-cd sqlguard-ml/python
+cd sqlguardjs/python
 ```
 
 Install the required Python packages:

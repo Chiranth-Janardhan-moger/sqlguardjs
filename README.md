@@ -24,10 +24,10 @@ Use:
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('sqlguardjs');
+const { sqlguardjs } = require('sqlguardjs');
 
 const app = express();
-const guard = sqlguard();
+const guard = sqlguardjs();
 
 app.use(express.json());
 app.use(guard.global());
@@ -101,7 +101,7 @@ Default limits such as `maxPayloadLength`, `maxDepth`, and `maxFields` are inclu
 - Detects XSS payloads including script tags, event-handler attributes, JavaScript execution URLs, dangerous HTML containers, `srcdoc`, and `data:text/html`.
 - Normalizes repeated URL encoding, `%uXXXX`, HTML entities, printable Base64, plus-separated query strings, Unicode spacing, zero-width characters, and control-character splitting.
 - Scans `req.query`, `req.body`, `req.headers`, `req.params`, `req.cookies`, nested objects, arrays, object keys, strings, and Buffers.
-- Supports a secure router API with `sqlguard().global()`, `sqlguard().route()`, and `secureRouter()`.
+- Supports a secure router API with `sqlguardjs().global()`, `sqlguardjs().route()`, and `secureRouter()`.
 - Supports weighted confidence scoring, suspicious request escalation, schema-aware route checks, safe learning events, dry-run rollout, route skipping, structured admin logs, and request-size safety limits.
 - Includes TypeScript definitions and real Express integration tests.
 
@@ -113,10 +113,10 @@ Register SQLGuardJS after body parsers and before protected routes.
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('sqlguardjs');
+const { sqlguardjs } = require('sqlguardjs');
 
 const app = express();
-const guard = sqlguard({
+const guard = sqlguardjs({
   threshold: 0.5,
   suspiciousThreshold: 0.2,
   logAttacks: true
@@ -233,14 +233,16 @@ router.post('/login', {
 Route schema keys can also be configured globally:
 
 ```javascript
-app.use(sqlguard({
+const schemaGuard = sqlguardjs({
   schemas: {
     'POST /login': {
       body: ['email', 'password'],
       query: []
     }
   }
-}).global());
+});
+
+app.use(schemaGuard.global());
 ```
 
 ## Safe Learning Mode
@@ -369,9 +371,9 @@ Common labels:
 ## CLI
 
 ```bash
-sqlguard scan "<script>alert(1)</script>"
-sqlguard scan "1 UNION/**/SELECT password FROM users--"
-sqlguard scan-file payloads.txt --format csv
+sqlguardjs scan "<script>alert(1)</script>"
+sqlguardjs scan "1 UNION/**/SELECT password FROM users--"
+sqlguardjs scan-file payloads.txt --format csv
 ```
 
 JSON is the default output. CSV output includes `payload,label,confidence`.
@@ -411,6 +413,7 @@ Contributors should add new bypasses or false positives as tests before changing
 ```text
 npm/                  Node package, Express middleware, CLI, and Jest tests
 npm/examples/         Minimal and production-style Express examples
+python/               Python reference detector and model-training scripts
 test_integration/     Local Express integration example
 .github/workflows/    CI configuration
 ```

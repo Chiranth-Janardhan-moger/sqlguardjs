@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from sqlguard_ml.api import app
+from sqlguardjs.api import app
 
 client = TestClient(app)
 
@@ -10,12 +10,12 @@ def test_health():
 
 def test_detect():
     # Make sure we have a trained model first
-    from sqlguard_ml.train_stub import train_and_save
+    from sqlguardjs.train_stub import train_and_save
     train_and_save()
     
     # Needs to reload startup event or call it manually
     import asyncio
-    from sqlguard_ml.api import startup_event
+    from sqlguardjs.api import startup_event
     asyncio.run(startup_event())
     
     # Test malicious
