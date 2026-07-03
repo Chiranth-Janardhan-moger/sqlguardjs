@@ -446,7 +446,7 @@ Current result:
 
 ```text
 Test Suites: 9 passed, 9 total
-Tests: 115 passed, 115 total
+Tests: 123 passed, 123 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

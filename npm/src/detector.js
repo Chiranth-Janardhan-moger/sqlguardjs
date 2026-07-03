@@ -49,20 +49,34 @@ function truncateForLog(value, maxLength = 500) {
   return `${text.slice(0, maxLength)}...[truncated ${text.length - maxLength} chars]`;
 }
 
+function readRequestProperty(obj, key, fallback = undefined) {
+  try {
+    const value = obj?.[key];
+    return value === undefined ? fallback : value;
+  } catch (_) {
+    return fallback;
+  }
+}
+
 function getIp(req) {
-  return req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+  const ip = readRequestProperty(req, 'ip', null);
+  if (ip) return ip;
+  const connection = readRequestProperty(req, 'connection', null);
+  return readRequestProperty(connection, 'remoteAddress', 'unknown') || 'unknown';
 }
 
 function getRequestUrl(req) {
-  return req.originalUrl || req.url || '';
+  return readRequestProperty(req, 'originalUrl', null) || readRequestProperty(req, 'url', '') || '';
 }
 
 function getRoutePath(req) {
-  if (req.route && req.route.path) {
-    const routePath = Array.isArray(req.route.path) ? req.route.path.join('|') : String(req.route.path);
-    return `${req.baseUrl || ''}${routePath}`;
+  const route = readRequestProperty(req, 'route', null);
+  const routePathValue = route ? readRequestProperty(route, 'path', null) : null;
+  if (routePathValue) {
+    const routePath = Array.isArray(routePathValue) ? routePathValue.join('|') : String(routePathValue);
+    return `${readRequestProperty(req, 'baseUrl', '') || ''}${routePath}`;
   }
-  return req.path || getRequestUrl(req).split('?')[0] || '';
+  return readRequestProperty(req, 'path', null) || getRequestUrl(req).split('?')[0] || '';
 }
 
 function sanitizeRequestId(value) {
@@ -129,7 +143,7 @@ function createDetectionEvent(req, payload, detection, options = {}) {
     blocked: action === 'block',
     dryRun: options.dryRun === true,
     requestId: options.getRequestId(req),
-    method: req.method || null,
+    method: readRequestProperty(req, 'method', null),
     url: getRequestUrl(req),
     route: getRoutePath(req),
     ip: getIp(req),
@@ -160,7 +174,7 @@ function createLearningEvent(req, payload, result, path, options = {}) {
     type: 'sqlguardjs.learning',
     timestamp: new Date().toISOString(),
     requestId: options.getRequestId(req),
-    method: req.method || null,
+    method: readRequestProperty(req, 'method', null),
     url: getRequestUrl(req),
     route: getRoutePath(req),
     ip: getIp(req),
@@ -187,11 +201,11 @@ function normalizeSchemaRule(rule) {
 }
 
 function pathnameFromRequest(req) {
-  return (getRequestUrl(req).split('?')[0] || req.path || '').replace(/\/+$/, '') || '/';
+  return (getRequestUrl(req).split('?')[0] || readRequestProperty(req, 'path', '') || '').replace(/\/+$/, '') || '/';
 }
 
 function schemaCandidates(req) {
-  const method = (req.method || '').toUpperCase();
+  const method = String(readRequestProperty(req, 'method', '') || '').toUpperCase();
   const route = getRoutePath(req);
   const path = pathnameFromRequest(req);
   const candidates = [...new Set([route, path].filter(Boolean))];
@@ -698,7 +712,7 @@ function expressMiddleware(options = {}) {
             blocked: !dryRun,
             dryRun,
             requestId: eventOptions.getRequestId(req),
-            method: req.method || null,
+            method: readRequestProperty(req, 'method', null),
             url: getRequestUrl(req),
             route: getRoutePath(req),
             ip: getIp(req),

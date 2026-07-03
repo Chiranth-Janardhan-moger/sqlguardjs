@@ -428,6 +428,61 @@ describe('Express middleware hardening options', () => {
     expect(req.sqlguardjs.reason).toBe('schema_source_read_failed');
   });
 
+  it.each([
+    'ip',
+    'connection',
+    'originalUrl',
+    'url',
+    'method',
+    'route',
+    'path'
+  ])('does not let throwing request metadata getters break attack handling: %s', async propertyName => {
+    const middleware = expressMiddleware();
+    const req = {
+      query: { q: "1' OR '1'='1" }
+    };
+    Object.defineProperty(req, propertyName, {
+      enumerable: true,
+      get() {
+        throw new Error(`${propertyName} getter failed`);
+      }
+    });
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await expect(middleware(req, res, next)).resolves.toBeUndefined();
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      details: { label: 'sqli' }
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('does not let throwing route baseUrl getters break attack handling', async () => {
+    const middleware = expressMiddleware();
+    const req = {
+      query: { q: "1' OR '1'='1" },
+      route: { path: '/login' }
+    };
+    Object.defineProperty(req, 'baseUrl', {
+      enumerable: true,
+      get() {
+        throw new Error('baseUrl getter failed');
+      }
+    });
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await expect(middleware(req, res, next)).resolves.toBeUndefined();
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      details: { label: 'sqli' }
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('escapes newlines in text logs and request IDs', async () => {
     const logs = [];
     const middleware = expressMiddleware({
