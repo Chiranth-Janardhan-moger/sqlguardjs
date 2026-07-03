@@ -7,6 +7,14 @@ const DEFAULT_MAX_PAYLOAD_LENGTH = 50000;
 const DEFAULT_MAX_DEPTH = 20;
 const DEFAULT_MAX_FIELDS = 1000;
 const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*)';
+const SQL_WORD_BOOLEAN_OPERATOR = '(?:OR|AND|XOR)';
+const SQL_SYMBOL_BOOLEAN_OPERATOR = '(?:\\|\\||&&)';
+const SQL_BOOLEAN_OPERATOR = `(?:(?:\\b${SQL_WORD_BOOLEAN_OPERATOR}\\b)|${SQL_SYMBOL_BOOLEAN_OPERATOR})`;
+const SQL_COMPARISON_OPERATOR = '(?:=|LIKE|!=|<>|<=|>=|<|>)';
+const SQL_CONSTANT_VALUE = '(?:\\d+(?:\\.\\d+)?|N?[\'"][^\'"]{0,80}[\'"]?|NULL)';
+const SQL_VALUE = '(?:\\d+(?:\\.\\d+)?|N?[\'"][^\'"]{0,80}[\'"]?|[A-Za-z_][\\w.]*|NULL)';
+const SQL_CONSTANT_COMPARISON_EXPRESSION = `${SQL_CONSTANT_VALUE}\\s*${SQL_COMPARISON_OPERATOR}\\s*${SQL_CONSTANT_VALUE}`;
+const SQL_COMPARISON_EXPRESSION = `${SQL_VALUE}\\s*${SQL_COMPARISON_OPERATOR}\\s*${SQL_VALUE}`;
 const HTTP_METHODS = ['all', 'get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
 const DEFAULT_REDACT_KEYS = ['password', 'passwd', 'pwd', 'token', 'secret', 'authorization', 'cookie', 'api_key', 'apikey'];
 
@@ -21,8 +29,14 @@ function hasRepeatedQuotedLiteralComparison(value) {
   return false;
 }
 
+function sanitizeForLog(value) {
+  return String(value)
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+}
+
 function truncateForLog(value, maxLength = 500) {
-  const text = String(value);
+  const text = sanitizeForLog(value);
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength)}...[truncated ${text.length - maxLength} chars]`;
 }
@@ -43,7 +57,12 @@ function getRoutePath(req) {
   return req.path || getRequestUrl(req).split('?')[0] || '';
 }
 
-function defaultRequestId(req) {
+function sanitizeRequestId(value) {
+  if (value === null || value === undefined) return null;
+  return truncateForLog(value, 128);
+}
+
+function defaultRawRequestId(req) {
   return req.id || req.requestId || req.headers?.['x-request-id'] || req.headers?.['x-correlation-id'] || null;
 }
 
@@ -95,7 +114,11 @@ function createDetectionEvent(req, payload, detection, options = {}) {
 
 function formatEvent(event, format = 'text') {
   if (format === 'json') return event;
-  return `[SQLGuardJS] ${event.action === 'observe' ? 'Attack Observed' : 'Attack Blocked'}: ${event.label} from IP: ${event.ip} | requestId: ${event.requestId || '-'} | path: ${event.path} | confidence: ${event.confidence} | Payload: ${event.payloadPreview}`;
+  const safe = (value, fallback = '-') => {
+    if (value === null || value === undefined || value === '') return fallback;
+    return sanitizeForLog(value);
+  };
+  return `[SQLGuardJS] ${event.action === 'observe' ? 'Attack Observed' : 'Attack Blocked'}: ${safe(event.label)} from IP: ${safe(event.ip)} | requestId: ${safe(event.requestId)} | path: ${safe(event.path)} | confidence: ${safe(event.confidence)} | Payload: ${safe(event.payloadPreview)}`;
 }
 
 function createLearningEvent(req, payload, result, path, options = {}) {
@@ -123,9 +146,10 @@ function createLearningEvent(req, payload, result, path, options = {}) {
 function normalizeSchemaRule(rule) {
   if (!rule) return null;
   if (Array.isArray(rule)) return { allowed: rule, required: [], allowUnknown: false };
+  const required = rule.required || [];
   return {
-    allowed: rule.allowed || rule.fields || [],
-    required: rule.required || [],
+    allowed: rule.allowed || rule.fields || required,
+    required,
     allowUnknown: rule.allowUnknown === true
   };
 }
@@ -223,9 +247,14 @@ class Detector {
         pattern: new RegExp(`\\b${sqlWord('UNION')}\\s+(?:${sqlWord('ALL')}\\s+)?${sqlWord('SELECT')}\\b`, 'i')
       },
       {
+        id: 'mysql-versioned-comment',
+        confidence: 0.55,
+        pattern: /(?:\/\*!\d{0,6}|MYSQL_VERSIONED_COMMENT)/i
+      },
+      {
         id: 'boolean-tautology',
         confidence: 0.75,
-        pattern: /(?:['"`)]\s*(?:OR|AND)\s+(?:\d+\s*(?:=|LIKE)\s*\d+|['"][^'"]{0,80}['"]\s*=\s*['"][^'"]{0,80}['"]?|[A-Za-z_][\w.]*\s*(?:=|LIKE)\s*['"\d])|\b\d+\s+(?:OR|AND)\s+\d+\s*=\s*\d+)/i
+        pattern: new RegExp(`['"\`)]\\s*${SQL_BOOLEAN_OPERATOR}\\s+${SQL_COMPARISON_EXPRESSION}|${SQL_SYMBOL_BOOLEAN_OPERATOR}\\s+${SQL_COMPARISON_EXPRESSION}|\\b${SQL_WORD_BOOLEAN_OPERATOR}\\b\\s+${SQL_CONSTANT_COMPARISON_EXPRESSION}|\\b\\d+\\s+\\b${SQL_WORD_BOOLEAN_OPERATOR}\\b\\s+${SQL_CONSTANT_COMPARISON_EXPRESSION}`, 'i')
       },
       {
         id: 'drop-table',
@@ -323,6 +352,11 @@ class Detector {
         id: 'html-data-url',
         confidence: 0.65,
         pattern: /\bdata\s*:\s*text\/html/i
+      },
+      {
+        id: 'svg-data-url',
+        confidence: 0.65,
+        pattern: /(?:\bdata\s*:\s*image\/svg\+xml|SVG_DATA_URI)/i
       }
     ];
   }
@@ -368,6 +402,16 @@ class Detector {
       } catch (e) {}
       return normalized;
     };
+    const decodePrintableBase64 = (candidate) => {
+      try {
+        const b64Decoded = Buffer.from(candidate, 'base64').toString('utf8');
+        const nonPrintableCount = b64Decoded.replace(/[\t\r\n\x20-\x7E]/g, '').length;
+        const isMostlyPrintable = b64Decoded.length > 0 && nonPrintableCount / b64Decoded.length < 0.1;
+        return isMostlyPrintable && b64Decoded !== candidate ? b64Decoded : null;
+      } catch (e) {
+        return null;
+      }
+    };
 
     // Iterate decoding to catch multi-layer encoding
     let decoded = normalize(payload);
@@ -379,25 +423,34 @@ class Detector {
       iterations++;
     }
     const base64Candidate = decoded;
+    decoded = decoded.replace(/\bdata\s*:\s*([a-z0-9.+-]+\/[a-z0-9.+-]+)(?:;[a-z0-9=.+-]+)*;base64\s*,([A-Za-z0-9+/]+={0,2})/ig, (match, mimeType, data) => {
+      if (!/^(?:text\/html|image\/svg\+xml|application\/xhtml\+xml)$/i.test(mimeType)) return match;
+      const dataDecoded = decodePrintableBase64(data);
+      const marker = /^image\/svg\+xml$/i.test(mimeType) ? '\nSVG_DATA_URI' : '';
+      return dataDecoded ? `${match}${marker}\n${normalize(dataDecoded).replace(/\+/g, ' ')}` : match;
+    });
     decoded = decoded.replace(/\+/g, ' ');
     if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64Candidate)) {
-      try {
-        const b64Decoded = Buffer.from(base64Candidate, 'base64').toString('utf8');
-        const nonPrintableCount = b64Decoded.replace(/[\t\r\n\x20-\x7E]/g, '').length;
-        const isMostlyPrintable = b64Decoded.length > 0 && nonPrintableCount / b64Decoded.length < 0.1;
-        if (isMostlyPrintable && b64Decoded !== base64Candidate) {
-          decoded += `\n${normalize(b64Decoded).replace(/\+/g, ' ')}`;
-        }
-      } catch (e) {}
+      const b64Decoded = decodePrintableBase64(base64Candidate);
+      if (b64Decoded) decoded += `\n${normalize(b64Decoded).replace(/\+/g, ' ')}`;
     }
+    if (sqlCommentMode === 'preserve') return decoded;
     // Preserve SQL block comments as separators so UNION/**/SELECT stays tokenized.
     // Detection also checks a removal variant to catch mid-keyword splits such as UN/**/ION.
+    decoded = decoded.replace(/\/\*!\d{0,6}\s*([\s\S]*?)\*\//g, (_, inner) => {
+      const executableSql = inner.trim();
+      if (sqlCommentMode === 'remove') return executableSql;
+      return executableSql ? ` MYSQL_VERSIONED_COMMENT ${executableSql} ` : ' MYSQL_VERSIONED_COMMENT ';
+    });
     decoded = decoded.replace(/\/\*[\s\S]*?\*\//g, sqlCommentMode === 'remove' ? '' : ' ');
+    decoded = decoded.replace(/--[^\r\n]*(?=\r?\n|$)/g, ' ');
+    decoded = decoded.replace(/#[^\r\n]*(?=\r?\n|$)/g, ' ');
     return decoded;
   }
 
   payloadVariants(payload) {
     const variants = [
+      this.normalizePayload(payload, { sqlCommentMode: 'preserve' }),
       this.normalizePayload(payload, { sqlCommentMode: 'space' }),
       this.normalizePayload(payload, { sqlCommentMode: 'remove' })
     ];
@@ -469,11 +522,13 @@ function expressMiddleware(options = {}) {
   const logger = typeof options.logAttacks === 'function'
     ? options.logAttacks
     : (options.logAttacks ? console.warn : null);
+  const requestIdGetter = typeof options.getRequestId === 'function' ? options.getRequestId : defaultRawRequestId;
+  const rateLimitKeyGetter = typeof options.rateLimitKey === 'function' ? options.rateLimitKey : getIp;
   const eventOptions = {
     dryRun,
     redactKeys: options.redactKeys || DEFAULT_REDACT_KEYS,
     maxLogPayloadLength: options.maxLogPayloadLength,
-    getRequestId: typeof options.getRequestId === 'function' ? options.getRequestId : defaultRequestId
+    getRequestId: req => sanitizeRequestId(requestIdGetter(req))
   };
 
   const writeLog = (event) => {
@@ -493,6 +548,7 @@ function expressMiddleware(options = {}) {
     if (skip && skip(req)) return next();
 
     const ip = getIp(req);
+    const rateLimitKey = String(rateLimitKeyGetter(req) || ip || 'unknown');
     const sources = [];
     if (scanQuery) sources.push(['query', req.query]);
     if (scanBody) sources.push(['body', req.body]);
@@ -519,7 +575,7 @@ function expressMiddleware(options = {}) {
 
       if (!isMalicious && result.label !== 'benign' && result.confidence >= suspiciousThreshold) {
         emitLearning(req, str, result, path);
-        const suspiciousCount = rateLimiter.recordSuspicious(ip);
+        const suspiciousCount = rateLimiter.recordSuspicious(rateLimitKey);
         if (suspiciousCount >= maxSuspiciousRequests) {
            isMalicious = true;
            finalLabel = "rate_limit_escalation";

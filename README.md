@@ -93,6 +93,8 @@ SQLGuardJS scans decoded request data in memory. It does not call a database or 
 
 Default limits such as `maxPayloadLength`, `maxDepth`, and `maxFields` are included to keep worst-case request processing bounded.
 
+For high-throughput bulk import endpoints, set route-specific schemas and lower `maxFields` or `maxPayloadLength` to match the largest valid request your endpoint should accept. If an endpoint intentionally accepts large files or raw technical content, validate that upload path separately and use `skip` for the scanner on that route.
+
 ## Features
 
 - Detects SQL injection patterns including boolean tautologies, `UNION SELECT`, stacked statements, destructive DDL, time-delay probes, and metadata enumeration.
@@ -181,9 +183,14 @@ app.use('/api', router);
 
 Start with `dryRun: true` on real traffic. This records detections without blocking requests.
 
+If your app is behind nginx, Cloudflare, a load balancer, or a platform proxy, configure Express `trust proxy` before relying on IP-based suspicious-request escalation. For authenticated APIs, prefer a stable application identity with `rateLimitKey`, such as user ID plus IP.
+
 ```javascript
+app.set('trust proxy', 1);
+
 app.use(guard.global({
   dryRun: true,
+  rateLimitKey: req => req.user?.id ? `${req.user.id}:${req.ip}` : req.ip,
   logAttacks: event => {
     // Admins see these events in the application logs or wherever this function sends them.
     console.warn(JSON.stringify(event));
@@ -204,6 +211,8 @@ app.use(guard.global({
 
 If your app runs on Render, Railway, Fly.io, AWS, Azure, GCP, Docker, PM2, or a VPS, these events appear wherever your normal Node logs go. For a dashboard, pass `onThreat` and store the event in your database, logging platform, SIEM, or alerting system.
 
+Use `logFormat: 'json'` for production log ingestion. Text logs escape carriage returns and newlines, but structured JSON is safer for line-oriented log parsers and SIEM pipelines.
+
 After reviewing logs and tuning any route exclusions, enable blocking.
 
 ```javascript
@@ -217,6 +226,8 @@ app.use(guard.global({
 ## Schema-Aware Route Checks
 
 Schemas let you define the fields a route expects. Unexpected fields and missing required fields are reported as `schema_violation`.
+
+When a rule uses `required` without `allowed`, SQLGuardJS treats the required fields as the allowed fields. Set `allowUnknown: true` only when extra fields are intentionally accepted.
 
 ```javascript
 router.post('/login', {
@@ -260,6 +271,8 @@ app.use(guard.global({
 ```
 
 Use learning events for review, clustering, and regression-test creation. Do not automatically train on live traffic because attackers can poison self-learning systems.
+
+Learning mode only records payloads that match at least one signal and land below the blocking threshold. A zero-signal payload cannot be learned automatically; add adversarial tests for any confirmed bypass.
 
 ## Thresholds
 
@@ -325,11 +338,12 @@ Example result:
 | `threshold` | `0.5` | Blocks when `result.confidence >= threshold`. |
 | `suspiciousThreshold` | `0.2` | Starts learning events and repeated-probe tracking for non-benign results below `threshold`. |
 | `rateLimitWindowMs` | `300000` | Sliding window for repeated suspicious probes per IP. |
-| `maxSuspiciousRequests` | `3` | Suspicious requests per IP before escalation blocks. |
+| `maxSuspiciousRequests` | `3` | Suspicious requests per `rateLimitKey` before escalation blocks. |
 | `maxRateLimitCapacity` | `10000` | Maximum IP entries stored in the in-memory limiter. |
+| `rateLimitKey` | `req.ip` | Function `(req) => string`; choose the identity used for suspicious-request escalation. Configure Express `trust proxy` before relying on `req.ip` behind proxies. |
 | `dryRun` | `false` | Records detections and calls `next()` instead of blocking. |
 | `logAttacks` | `false` | `true` logs to `console.warn`; a function receives the formatted log message. |
-| `logFormat` | `text` | Use `json` to send structured events to `logAttacks`. |
+| `logFormat` | `text` | Use `json` to send structured events to `logAttacks`; recommended for production log pipelines. |
 | `onThreat` | `undefined` | Callback receiving `(event, req)` for detections. |
 | `learning` | `false` | Records suspicious allowed payloads without changing detector behavior. |
 | `onLearningEvent` | `undefined` | Callback receiving learning candidates for human review. |
@@ -403,7 +417,7 @@ Current result:
 
 ```text
 Test Suites: 9 passed, 9 total
-Tests: 51 passed, 51 total
+Tests: 63 passed, 63 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

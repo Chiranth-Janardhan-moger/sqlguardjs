@@ -67,6 +67,38 @@ describe('Rate Limiter Middleware Integration', () => {
     }));
   });
 
+  it('should support custom rate limit keys for users behind the same proxy', async () => {
+    const middleware = expressMiddleware({
+      maxSuspiciousRequests: 2,
+      threshold: 0.6,
+      rateLimitKey: req => req.headers['x-user-id'] || req.ip
+    });
+
+    const firstUserReq = {
+      ip: '10.0.0.10',
+      headers: { 'x-user-id': 'user-a' },
+      query: { q: 'javascript:' }
+    };
+    const secondUserReq = {
+      ip: '10.0.0.10',
+      headers: { 'x-user-id': 'user-b' },
+      query: { q: 'javascript:' }
+    };
+
+    await middleware(firstUserReq, mockRes, mockNext);
+    await middleware(secondUserReq, mockRes, mockNext);
+
+    expect(mockRes.status).not.toHaveBeenCalled();
+    expect(mockNext).toHaveBeenCalledTimes(2);
+
+    await middleware(firstUserReq, mockRes, mockNext);
+
+    expect(mockRes.status).toHaveBeenCalledWith(403);
+    expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
+      details: { label: 'rate_limit_escalation' }
+    }));
+  });
+
   it('should not make external calls for suspicious payloads', async () => {
     const realFetch = global.fetch;
     const mockFetch = jest.fn();

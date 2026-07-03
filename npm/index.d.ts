@@ -90,6 +90,7 @@ export interface ExpressMiddlewareOptions {
   rateLimitWindowMs?: number;
   maxSuspiciousRequests?: number;
   maxRateLimitCapacity?: number;
+  rateLimitKey?: (req: any) => string | null | undefined;
   dryRun?: boolean;
   logAttacks?: boolean | ((messageOrEvent: string | SqlGuardJSEvent, event?: SqlGuardJSEvent) => void);
   logFormat?: 'text' | 'json';
@@ -127,7 +128,7 @@ export type RequestHandler = (req: any, res: any, next: any) => any;
 export class Detector {
   constructor(options?: { maxPayloadLength?: number });
   decodeDeeply(payload: unknown): string;
-  normalizePayload(payload: unknown, options?: { sqlCommentMode?: 'space' | 'remove' }): string;
+  normalizePayload(payload: unknown, options?: { sqlCommentMode?: 'space' | 'remove' | 'preserve' }): string;
   payloadVariants(payload: unknown): string[];
   detect(payload: unknown): DetectionResult;
 }

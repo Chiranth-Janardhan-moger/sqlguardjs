@@ -32,6 +32,55 @@ describe('Security hardening regressions', () => {
     expect(result.matches.map(match => match.id)).toContain('comment-fragmented-union-select');
   });
 
+  it('detects MySQL versioned comments without deleting executable SQL', () => {
+    const payload = 'id=-1/*!50000UNION SELECT username,password FROM users*/';
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe('sqli');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toEqual(expect.arrayContaining([
+      'mysql-versioned-comment',
+      'union-select'
+    ]));
+  });
+
+  it.each([
+    'id=-1 UNION#foo\nSELECT username,password FROM users',
+    'id=-1 UNION-- foo\nSELECT username,password FROM users'
+  ])('detects SQL line comments used as keyword separators: %s', payload => {
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe('sqli');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toContain('union-select');
+  });
+
+  it.each([
+    "1' || '1'='1",
+    "1' && '1'='1",
+    'id=1 OR 1>0',
+    'id=1 OR 3!=4',
+    "' OR 'a'<'b"
+  ])('detects broadened SQL boolean tautology syntax: %s', payload => {
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe('sqli');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toContain('boolean-tautology');
+  });
+
+  it('decodes and detects base64 SVG data URI XSS payloads', () => {
+    const payload = 'data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+PC9zdmc+';
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe('xss');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toEqual(expect.arrayContaining([
+      'svg-data-url',
+      'html-event-attribute'
+    ]));
+  });
+
   it('detects bare destructive DDL without requiring a semicolon', () => {
     const result = detector.detect('DROP TABLE users');
 
@@ -90,6 +139,31 @@ describe('Express middleware hardening options', () => {
       label: 'sqli'
     }));
     expect(onThreat).toHaveBeenCalledWith(req.sqlguardjs, req);
+  });
+
+  it('escapes newlines in text logs and request IDs', async () => {
+    const logs = [];
+    const middleware = expressMiddleware({
+      logAttacks: message => logs.push(message)
+    });
+    const req = {
+      headers: {
+        'x-request-id': 'req-123\n[SQLGuardJS] forged request'
+      },
+      query: {
+        q: "1' OR '1'='1\n[SQLGuardJS] Attack Blocked: forged_entry from IP: 127.0.0.1"
+      }
+    };
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).not.toContain('\n');
+    expect(logs[0]).toContain('req-123\\n[SQLGuardJS] forged request');
+    expect(logs[0]).toContain("'1'='1\\n[SQLGuardJS] Attack Blocked: forged_entry");
   });
 
   it('supports skip callbacks and custom block status codes', async () => {

@@ -64,6 +64,8 @@ Express does not populate `req.params` until after a route is matched.
 
 SQLGuardJS scans decoded request data in memory. Actual latency depends on payload size, nesting depth, logging, and schema checks.
 
+For bulk endpoints, lower `maxFields` and `maxPayloadLength` to the largest valid request shape, or use `skip` and validate that upload path separately.
+
 ## Secure Router
 
 Use `secureRouter()` when you want the router to handle both global request scanning and route-level parameter/schema checks automatically.
@@ -94,7 +96,10 @@ router.post('/login', {
 Admins can see detections by enabling `logAttacks` or `onThreat`. In production, send these events to your normal logger, cloud logs, SIEM, database, or alerting system.
 
 ```javascript
+app.set('trust proxy', 1);
+
 app.use(guard.global({
+  rateLimitKey: req => req.user?.id ? `${req.user.id}:${req.ip}` : req.ip,
   logFormat: 'json',
   logAttacks: event => console.warn(JSON.stringify(event)),
   onThreat(event) {
@@ -104,6 +109,7 @@ app.use(guard.global({
 ```
 
 Sensitive fields such as passwords and tokens are redacted in payload previews by default.
+Use `logFormat: 'json'` for production log ingestion. Text logs escape carriage returns and newlines, but structured logs are safer for line-oriented parsers.
 
 ## Safe Learning Mode
 

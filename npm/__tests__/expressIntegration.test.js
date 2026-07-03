@@ -69,6 +69,42 @@ describe('Express integration', () => {
       });
   });
 
+  it('treats required-only schemas as an allowlist unless allowUnknown is true', async () => {
+    const app = express();
+    const router = secureRouter();
+
+    app.use(express.json());
+    router.post('/login', {
+      schema: {
+        body: {
+          required: ['username', 'password']
+        }
+      }
+    }, (req, res) => res.json({ ok: true }));
+    router.post('/profile', {
+      schema: {
+        body: {
+          required: ['displayName'],
+          allowUnknown: true
+        }
+      }
+    }, (req, res) => res.json({ ok: true }));
+    app.use(router);
+
+    await request(app)
+      .post('/login')
+      .send({ username: 'a', password: 'b', isAdmin: true })
+      .expect(403)
+      .expect(res => {
+        expect(res.body.details.label).toBe('schema_violation');
+      });
+
+    await request(app)
+      .post('/profile')
+      .send({ displayName: 'A', theme: 'dark' })
+      .expect(200);
+  });
+
   it('emits structured JSON logs with redacted sensitive payload previews', async () => {
     const logs = [];
     const app = express();
