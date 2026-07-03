@@ -1,5 +1,5 @@
 import json
-import pickle
+from pathlib import Path
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers
@@ -22,30 +22,38 @@ class AttentionLayer(layers.Layer):
         return cfg
 
 # --- paths & constants ---
-MODEL_PATH = "attack_cnn_lstm.h5"
-TOKENIZER_PATH = "tokenizer.json"
-LABEL_ENCODER_PATH = "label_encoder.pkl"
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "attack_cnn_lstm.h5"
+TOKENIZER_PATH = BASE_DIR / "tokenizer.json"
+LABEL_ENCODER_PATH = BASE_DIR / "label_encoder.json"
 MAX_SEQUENCE_LENGTH = 120  # match training
 
-# load model with custom_objects
-model = tf.keras.models.load_model(MODEL_PATH, custom_objects={"AttentionLayer": AttentionLayer})
+model = None
+tokenizer = None
+le = None
 
-# load tokenizer
-with open(TOKENIZER_PATH, "r", encoding="utf-8") as f:
-    tokenizer_json = f.read()
-tokenizer = tokenizer_from_json(tokenizer_json)
+def load_artifacts():
+    global model, tokenizer, le
+    if model is not None:
+        return
 
-# load label encoder
-with open(LABEL_ENCODER_PATH, "rb") as f:
-    le = pickle.load(f)
+    model = tf.keras.models.load_model(MODEL_PATH, custom_objects={"AttentionLayer": AttentionLayer})
+
+    with open(TOKENIZER_PATH, "r", encoding="utf-8") as f:
+        tokenizer_json = f.read()
+    tokenizer = tokenizer_from_json(tokenizer_json)
+
+    with open(LABEL_ENCODER_PATH, "r", encoding="utf-8") as f:
+        le = np.array(json.load(f))
 
 def predict_payload(text: str) -> str:
     """Predict attack type for a payload"""
+    load_artifacts()
     seq = tokenizer.texts_to_sequences([text])
     pad = pad_sequences(seq, maxlen=MAX_SEQUENCE_LENGTH, padding="post", truncating="post")
     probs = model.predict(pad, verbose=0)
     pred = int(np.argmax(probs, axis=1)[0])
-    return le.classes_[pred]
+    return le[pred]
 
 if __name__ == "__main__":
     print("Test 1", predict_payload("' OR '1"))

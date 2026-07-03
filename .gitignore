@@ -3,7 +3,12 @@ node_modules/
 .supergoal/
 __pycache__/
 *.pyc
+*.egg-info/
 .env
 .venv/
 venv/
 *.log
+dist/
+build/
+*.whl
+*.tar.gz

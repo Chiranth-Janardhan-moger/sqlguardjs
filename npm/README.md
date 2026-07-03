@@ -8,7 +8,7 @@
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
-SQLGuardJS is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads. It runs in-process and does not call a database or external service.
+SQLGuardJS is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads. It runs in-process, combines normalization with structural token analysis, and does not call a database or external service.
 
 ## 30-Second Quick Start
 
@@ -58,7 +58,7 @@ Attacker -> SQLGuardJS -> Blocked with 403 if malicious, otherwise passed to the
 Express does not populate `req.params` until after a route is matched.
 
 - `guard.global()` checks body, query, headers, and cookies before routes.
-- `guard.route()` checks `req.params` and optional schemas after Express resolves a route.
+- `guard.route()` checks any request sources not already scanned, plus `req.params` and optional schemas after Express resolves a route.
 
 ## Performance
 
@@ -67,6 +67,8 @@ SQLGuardJS scans decoded request data in memory. Actual latency depends on paylo
 For bulk endpoints, lower `maxFields` and `maxPayloadLength` to the largest valid request shape, or use `skip` and validate that upload path separately.
 
 SQLGuardJS scans Express-visible data, including plain objects, arrays, buffers, `URLSearchParams`, `Map`, and `Set` containers. Register body parsers before the guard, and expose custom webhook or multipart bytes as `req.rawBody` if your route parses the raw stream later. Unparsed request streams are not visible to any middleware that only reads `req.body`.
+
+The detector uses weighted signatures plus structural SQL-fragment and JavaScript pseudo-protocol analysis, so boolean predicates, stacked statements, metadata enumeration, and constructor-chain `javascript:` payloads are not tied to one exact payload spelling.
 
 ## Secure Router
 
@@ -92,6 +94,8 @@ router.post('/login', {
   res.json({ ok: true });
 });
 ```
+
+`secureRouter()` auto-wraps direct HTTP method registrations such as `get`, `post`, `put`, and `all`. For path-scoped `router.use()` or chained `router.route()` declarations, pass `guard.route()` explicitly.
 
 ## Admin Logs
 
@@ -119,6 +123,18 @@ Failures thrown by `logAttacks`, `onThreat`, and `onLearningEvent` are isolated 
 
 In `dryRun` mode, SQLGuardJS scans the full request instead of stopping at the first detection. The first detection is stored on `req.sqlguardjs`; all detections are stored on `req.sqlguardjsDetections`.
 
+## Final SQL Query Guard
+
+For second-order injection risk, where stored data is later concatenated into SQL, use the final-query guard at the database boundary:
+
+```javascript
+const { assertSafeSqlQuery } = require('sqlguardjs');
+
+assertSafeSqlQuery("SELECT * FROM users WHERE name = 'admin' OR 2>1");
+```
+
+Keep using parameterized queries. This guard fails closed if unsafe dynamic SQL reaches the sink.
+
 ## Safe Learning Mode
 
 ```javascript
@@ -132,6 +148,21 @@ app.use(guard.global({
 ```
 
 Learning mode records suspicious allowed payloads for human review. It does not auto-train or mutate rules.
+
+## Traffic Tuning
+
+Use `evaluatePayloads()` with labeled traffic samples to measure false positives before changing thresholds:
+
+```javascript
+const { evaluatePayloads } = require('sqlguardjs');
+
+const report = evaluatePayloads([
+  { payload: 'hello world', label: 'benign' },
+  { payload: '<script>alert(1)</script>', label: 'xss' }
+]);
+
+console.log(report.summary);
+```
 
 ## CLI
 

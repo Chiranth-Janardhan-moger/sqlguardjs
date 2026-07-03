@@ -2,8 +2,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 const util = require('util');
 const { Detector } = require('../src/detector');
+
+const MAX_CLI_PAYLOAD_LENGTH = 50000;
 
 function printHelp() {
   console.log(`
@@ -26,7 +29,53 @@ function csvCell(value) {
   return `"${formulaSafeText.replace(/"/g, '""')}"`;
 }
 
-function main() {
+function payloadForOutput(payload) {
+  const text = String(payload);
+  if (text.length <= MAX_CLI_PAYLOAD_LENGTH) return text;
+  return `${text.slice(0, MAX_CLI_PAYLOAD_LENGTH)}...[truncated ${text.length - MAX_CLI_PAYLOAD_LENGTH} chars]`;
+}
+
+async function scanFile(filepath, format, detector) {
+  try {
+    await fs.promises.access(filepath, fs.constants.R_OK);
+  } catch (err) {
+    console.error(`Error: Failed to read file at ${filepath} (${err.message})`);
+    process.exit(1);
+  }
+
+  const stream = fs.createReadStream(filepath, { encoding: 'utf8' });
+  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  if (format === 'csv') {
+    console.log('payload,label,confidence');
+  } else {
+    process.stdout.write('[\n');
+  }
+
+  let isFirstJsonRow = true;
+  try {
+    for await (const line of lines) {
+      if (line.trim().length === 0) continue;
+      const result = detector.detect(line);
+      const row = { payload: payloadForOutput(line), result };
+      if (format === 'csv') {
+        console.log(`${csvCell(row.payload)},${csvCell(result.label)},${result.confidence}`);
+      } else {
+        process.stdout.write(`${isFirstJsonRow ? '' : ',\n'}${JSON.stringify(row, null, 2)}`);
+        isFirstJsonRow = false;
+      }
+    }
+  } catch (err) {
+    console.error(`Error: Failed to read file at ${filepath} (${err.message})`);
+    process.exit(1);
+  }
+
+  if (format !== 'csv') {
+    process.stdout.write(isFirstJsonRow ? ']\n' : '\n]\n');
+  }
+}
+
+async function main() {
   const { values, positionals } = util.parseArgs({ 
     args: process.argv.slice(2), 
     options: { 
@@ -57,9 +106,9 @@ function main() {
     
     if (format === 'csv') {
       console.log('payload,label,confidence');
-      console.log(`${csvCell(payload)},${csvCell(result.label)},${result.confidence}`);
+      console.log(`${csvCell(payloadForOutput(payload))},${csvCell(result.label)},${result.confidence}`);
     } else {
-      console.log(JSON.stringify({ payload, result }, null, 2));
+      console.log(JSON.stringify({ payload: payloadForOutput(payload), result }, null, 2));
     }
     
   } else if (command === 'scan-file') {
@@ -69,25 +118,7 @@ function main() {
     }
     const filepath = path.resolve(args[1]);
     
-    let content;
-    try {
-      content = fs.readFileSync(filepath, 'utf8');
-    } catch (err) {
-      console.error(`Error: Failed to read file at ${filepath} (${err.message})`);
-      process.exit(1);
-    }
-    const payloads = content.split(/\r?\n/).filter(line => line.trim().length > 0);
-    
-    const results = payloads.map(p => ({ payload: p, result: detector.detect(p) }));
-    
-    if (format === 'csv') {
-      console.log('payload,label,confidence');
-      results.forEach(r => {
-        console.log(`${csvCell(r.payload)},${csvCell(r.result.label)},${r.result.confidence}`);
-      });
-    } else {
-      console.log(JSON.stringify(results, null, 2));
-    }
+    await scanFile(filepath, format, detector);
     
   } else {
     console.error(`Unknown command: ${command}`);
@@ -96,4 +127,7 @@ function main() {
   }
 }
 
-main();
+main().catch(err => {
+  console.error(`Error: ${err.message}`);
+  process.exit(1);
+});

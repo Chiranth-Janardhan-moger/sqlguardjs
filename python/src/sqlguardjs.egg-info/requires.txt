@@ -1,6 +1,0 @@
-tensorflow
-keras>=3.15.0
-numpy
-fastapi
-uvicorn
-scikit-learn

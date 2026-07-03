@@ -1,4 +1,4 @@
-const { Detector } = require('../src/detector');
+const { Detector, SqlGuardJSQueryError, assertSafeSqlQuery, evaluatePayloads, scanSqlQuery } = require('../src/detector');
 
 describe('Detector', () => {
   let detector;
@@ -72,6 +72,44 @@ describe('Detector', () => {
     expect(detector.detect("admin'--").label).toBe('sqli');
     expect(detector.detect("admin' --").label).toBe('sqli');
     expect(detector.detect("admin'#").label).toBe('sqli');
+  });
+
+  test('should support sink-side final SQL query scanning for second-order injection risk', () => {
+    const safe = scanSqlQuery('SELECT * FROM users WHERE id = $1');
+
+    expect(safe.label).toBe('benign');
+    expect(() => assertSafeSqlQuery("SELECT * FROM users WHERE name = 'admin' OR 2>1")).toThrow(SqlGuardJSQueryError);
+  });
+
+  test('should attach detection details to unsafe SQL query errors', () => {
+    try {
+      assertSafeSqlQuery('SELECT * FROM users; DROP TABLE users');
+      throw new Error('expected query guard to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SqlGuardJSQueryError);
+      expect(error.result.label).toBe('sqli');
+      expect(error.result.confidence).toBeGreaterThanOrEqual(0.5);
+    }
+  });
+
+  test('should evaluate labeled traffic samples for threshold tuning', () => {
+    const report = evaluatePayloads([
+      { payload: 'hello world', label: 'benign' },
+      { payload: 'Please select your favorite color', label: 'benign' },
+      { payload: "admin' OR 2>1", label: 'sqli' },
+      { payload: '<script>alert(1)</script>', label: 'xss' }
+    ]);
+
+    expect(report.summary).toEqual(expect.objectContaining({
+      total: 4,
+      labeled: 4,
+      falsePositives: 0,
+      falseNegatives: 0,
+      truePositives: 2,
+      trueNegatives: 2,
+      falsePositiveRate: 0,
+      falseNegativeRate: 0
+    }));
   });
 
   describe('Comprehensive 27-Vector Regression Suite', () => {

@@ -8,7 +8,7 @@
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
-SQLGuardJS is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides an in-process heuristic detector, secure router API, command-line scanner, structured admin logs, schema-aware route checks, safe learning events, and request-size safety limits.
+SQLGuardJS is an Express request verification layer for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides in-process normalization, structural token analysis, weighted signals, a secure router API, command-line scanner, structured admin logs, schema-aware route checks, safe learning events, and request-size safety limits.
 
 SQLGuardJS is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
 
@@ -83,7 +83,7 @@ Attacker
 Express does not populate `req.params` until after a route is matched. SQLGuardJS therefore provides two guard points:
 
 - `guard.global()` scans request bodies, query strings, headers, and cookies before route handlers run.
-- `guard.route()` scans `req.params` and applies optional route schemas after Express resolves the route.
+- `guard.route()` scans any request sources not already scanned, then checks `req.params` and optional route schemas after Express resolves the route.
 
 Use both when you want all common request inputs inspected before your route logic runs.
 
@@ -98,9 +98,11 @@ For high-throughput bulk import endpoints, set route-specific schemas and lower 
 ## Features
 
 - Detects SQL injection patterns including boolean tautologies, `UNION SELECT`, stacked statements, destructive DDL, time-delay probes, and metadata enumeration.
+- Uses structural SQL-fragment analysis for boolean predicates, stacked statements, and metadata enumeration instead of depending only on exact regular-expression payload strings.
 - Handles SQL comment evasion, including `UNION/**/SELECT` and `UN/**/ION SEL/**/ECT`.
 - Detects NoSQL operator probes such as `$where`, `$ne`, `$gt`, `$regex`, `$or`, and `$and`.
 - Detects XSS payloads including script tags, event-handler attributes, JavaScript execution URLs, dangerous HTML containers, `srcdoc`, and `data:text/html`.
+- Tokenizes JavaScript pseudo-protocol bodies to catch constructor-chain and global-object execution routes.
 - Normalizes repeated URL encoding, `%uXXXX`, HTML entities, printable Base64, plus-separated query strings, Unicode spacing, zero-width characters, and control-character splitting.
 - Scans `req.query`, `req.body`, `req.headers`, `req.params`, `req.cookies`, nested objects, arrays, object keys, strings, and Buffers.
 - Supports a secure router API with `sqlguardjs().global()`, `sqlguardjs().route()`, and `secureRouter()`.
@@ -131,7 +133,7 @@ app.use(express.text({ type: ['text/plain', 'application/*+json'], limit: '1mb' 
 // Global scanner checks body, query, headers, and cookies.
 app.use(guard.global({ scanParams: false }));
 
-// Route verifier checks params after Express resolves them.
+// Route verifier checks any unscanned sources plus params after Express resolves them.
 app.get('/users/:id', guard.route(), (req, res) => {
   res.json({ id: req.params.id });
 });
@@ -199,6 +201,8 @@ router.post('/login', {
 app.use('/api', router);
 ```
 
+`secureRouter()` auto-wraps direct HTTP method registrations such as `get`, `post`, `put`, and `all`. For path-scoped `router.use()` or chained `router.route()` declarations, pass `guard.route()` explicitly.
+
 ## Production Rollout
 
 Start with `dryRun: true` on real traffic. This records detections without blocking requests.
@@ -247,6 +251,21 @@ app.use(guard.global({
   skip: req => req.path === '/health'
 }));
 ```
+
+## Final SQL Query Guard
+
+Request middleware cannot see a value after your app stores it and later concatenates it into a SQL string. For that second-order injection class, check the final SQL string at the database boundary:
+
+```javascript
+const { assertSafeSqlQuery } = require('sqlguardjs');
+
+async function checkedQuery(db, sql, params) {
+  assertSafeSqlQuery(sql);
+  return db.query(sql, params);
+}
+```
+
+This is still a guardrail, not a substitute for parameterized queries. Use it to fail closed if unsafe dynamic SQL reaches the sink.
 
 ## Schema-Aware Route Checks
 
@@ -298,6 +317,23 @@ app.use(guard.global({
 Use learning events for review, clustering, and regression-test creation. Do not automatically train on live traffic because attackers can poison self-learning systems.
 
 Learning mode only records payloads that match at least one signal and land below the blocking threshold. A zero-signal payload cannot be learned automatically; add adversarial tests for any confirmed bypass.
+
+## Traffic Tuning
+
+Use `evaluatePayloads()` against labeled production-like samples before tightening thresholds:
+
+```javascript
+const { evaluatePayloads } = require('sqlguardjs');
+
+const report = evaluatePayloads([
+  { payload: 'hello world', label: 'benign' },
+  { payload: "admin' OR 2>1", label: 'sqli' }
+]);
+
+console.log(report.summary.falsePositiveRate);
+```
+
+Accepted safe labels are `benign`, `safe`, `normal`, and `clean`. Attack labels such as `sqli`, `xss`, `nosql`, `malicious`, and `attack` count as malicious for false-negative tracking.
 
 ## Thresholds
 
@@ -365,6 +401,7 @@ Example result:
 | `rateLimitWindowMs` | `300000` | Sliding window for repeated suspicious probes per IP. |
 | `maxSuspiciousRequests` | `3` | Suspicious requests per `rateLimitKey` before escalation blocks. |
 | `maxRateLimitCapacity` | `10000` | Maximum IP entries stored in the in-memory limiter. |
+| `maxRateLimitEventsPerKey` | `1000` | Maximum timestamps retained for one `rateLimitKey`; never lower than `maxSuspiciousRequests`. |
 | `rateLimitKey` | `req.ip` | Function `(req) => string`; choose the identity used for suspicious-request escalation. Configure Express `trust proxy` before relying on `req.ip` behind proxies. |
 | `dryRun` | `false` | Records detections across the full request and calls `next()` instead of blocking. |
 | `logAttacks` | `false` | `true` logs to `console.warn`; a function receives the formatted log message. |
@@ -439,14 +476,14 @@ cd npm
 npm test
 ```
 
-The Node suite covers the detector, middleware, adversarial bypasses, header/raw body scanning, rate limiting, CLI behavior, package metadata, and benign traffic false-positive checks.
+The Node suite covers the detector, middleware, generated adversarial corpora, header/raw body scanning, rate limiting, CLI behavior, package metadata, and benign traffic false-positive checks.
 It also includes real Express integration tests with `supertest` for query, body, params, schema checks, structured logs, and learning events.
 
 Current result:
 
 ```text
-Test Suites: 9 passed, 9 total
-Tests: 130 passed, 130 total
+Test Suites: 10 passed, 10 total
+Tests: 156 passed, 156 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

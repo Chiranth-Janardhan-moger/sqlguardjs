@@ -58,6 +58,8 @@ describe('Security hardening regressions', () => {
   it.each([
     "1' || '1'='1",
     "1' && '1'='1",
+    "admin' OR 2>1",
+    '1 XOR 2>1',
     'id=1 OR 1>0',
     'id=1 OR 3!=4',
     "' OR 'a'<'b",
@@ -74,6 +76,17 @@ describe('Security hardening regressions', () => {
   });
 
   it.each([
+    '1 OR ASCII(SUBSTR(password,1,1))>64',
+    '1 OR CHAR(49)=CHAR(49)'
+  ])('detects SQL boolean predicates with function calls: %s', payload => {
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe('sqli');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toContain('boolean-tautology');
+  });
+
+  it.each([
     '1 UNION(SELECT password FROM users)',
     '1 UNION DISTINCT SELECT password FROM users'
   ])('detects UNION SELECT variants: %s', payload => {
@@ -82,6 +95,35 @@ describe('Security hardening regressions', () => {
     expect(result.label).toBe('sqli');
     expect(result.confidence).toBeGreaterThanOrEqual(0.5);
     expect(result.matches.map(match => match.id)).toContain('union-select');
+  });
+
+  it('detects stacked statements wrapped in parentheses', () => {
+    const payload = '1;(SELECT COUNT(*) FROM information_schema.columns A, information_schema.columns B)';
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe('sqli');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toContain('stacked-sql-statement');
+  });
+
+  it.each([
+    ['information schema', 'SELECT COUNT(*) FROM information_schema.columns'],
+    ['Oracle catalog', 'SELECT COUNT(*) FROM all_tables'],
+    ['MySQL InnoDB stats', 'SELECT table_name FROM mysql.innodb_table_stats'],
+    ['SQL Server columns', 'SELECT name FROM sys.columns']
+  ])('blocks SQL metadata enumeration queries: %s', (_name, payload) => {
+    const result = detector.detect(payload);
+
+    expect(result.label).toBe('sqli');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toContain('sql-metadata-query');
+  });
+
+  it('keeps standalone metadata catalog mentions below the default block threshold', () => {
+    const result = detector.detect('The all_tables view is documented in Oracle.');
+
+    expect(result.confidence).toBeLessThan(0.5);
+    expect(result.matches.map(match => match.id)).not.toContain('sql-metadata-query');
   });
 
   it.each([
@@ -183,6 +225,25 @@ describe('Security hardening regressions', () => {
     expect(result.label).toBe('xss');
     expect(result.confidence).toBeGreaterThanOrEqual(0.2);
     expect(result.confidence).toBeLessThan(0.5);
+  });
+
+  it('blocks javascript URLs in URL-bearing HTML attributes', () => {
+    const result = detector.detect('<a href="javascript:globalThis[\'al\'+\'ert\'](1)">x</a>');
+
+    expect(result.label).toBe('xss');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toEqual(expect.arrayContaining([
+      'javascript-url-with-sink',
+      'javascript-url-attribute'
+    ]));
+  });
+
+  it('blocks javascript URLs that route through constructor chains before the sink', () => {
+    const result = detector.detect('javascript:[]["constructor"]["constructor"]("alert(1)")()');
+
+    expect(result.label).toBe('xss');
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+    expect(result.matches.map(match => match.id)).toContain('javascript-url-with-sink');
   });
 });
 

@@ -33,6 +33,47 @@ describe('Express integration', () => {
       });
   });
 
+  it('guard.route blocks body and query payloads when used without guard.global', async () => {
+    const app = express();
+    const guard = sqlguardjs();
+
+    app.use(express.json());
+    app.post('/login', guard.route(), (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .post('/login?next=javascript:alert(1)')
+      .send({ email: 'a@example.com', bio: 'hello' })
+      .expect(403)
+      .expect(res => {
+        expect(res.body.details.label).toBe('xss');
+      });
+
+    await request(app)
+      .post('/login')
+      .send({ email: 'a@example.com', bio: '<script>alert(1)</script>' })
+      .expect(403)
+      .expect(res => {
+        expect(res.body.details.label).toBe('xss');
+      });
+  });
+
+  it('guard.route skips request sources already scanned by guard.global', async () => {
+    const app = express();
+    const onThreat = jest.fn();
+    const guard = sqlguardjs({ dryRun: true, onThreat });
+
+    app.use(express.json());
+    app.use(guard.global({ scanParams: false }));
+    app.post('/login/:id', guard.route(), (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .post('/login/123')
+      .send({ bio: '<script>alert(1)</script>' })
+      .expect(200);
+
+    expect(onThreat).toHaveBeenCalledTimes(1);
+  });
+
   it('secureRouter inserts global and route-level guards automatically', async () => {
     const app = express();
     const router = secureRouter();
@@ -97,6 +138,39 @@ describe('Express integration', () => {
     await request(app)
       .head('/head/1%20UNION%20SELECT%20password%20FROM%20users')
       .expect(403);
+  });
+
+  it('guard.route can be applied explicitly to router.route() declarations', async () => {
+    const app = express();
+    const router = express.Router();
+    const guard = sqlguardjs();
+
+    router.route('/users/:id')
+      .get(guard.route(), (req, res) => res.json({ id: req.params.id }));
+    app.use(router);
+
+    await request(app)
+      .get('/users/1%20UNION%20SELECT%20password%20FROM%20users')
+      .expect(403)
+      .expect(res => {
+        expect(res.body.details.label).toBe('sqli');
+      });
+  });
+
+  it('guard.route can be applied explicitly to path-scoped use() handlers', async () => {
+    const app = express();
+    const router = express.Router();
+    const guard = sqlguardjs();
+
+    router.use('/users/:id', guard.route(), (req, res) => res.json({ id: req.params.id }));
+    app.use(router);
+
+    await request(app)
+      .get('/users/1%20UNION%20SELECT%20password%20FROM%20users')
+      .expect(403)
+      .expect(res => {
+        expect(res.body.details.label).toBe('sqli');
+      });
   });
 
   it('secureRouter does not mistake decorated handler functions for route options', async () => {

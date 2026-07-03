@@ -6,6 +6,7 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.preprocessing.text import tokenizer_from_json
+from .artifacts import verify_artifact
 
 class AttentionLayer(layers.Layer):
     def __init__(self, **kwargs):
@@ -27,6 +28,7 @@ class PayloadDetector:
         self.tokenizer = None
         self.le = None
         self.max_sequence_length = 120
+        self.max_payload_length = 50000
         self.models_dir = os.path.join(os.path.dirname(__file__), "models")
 
     def _load_artifacts(self):
@@ -45,13 +47,13 @@ class PayloadDetector:
             raise FileNotFoundError(f"Label encoder not found at {le_path}")
 
         self.model = tf.keras.models.load_model(
-            model_path, custom_objects={"AttentionLayer": AttentionLayer}
+            verify_artifact(model_path), custom_objects={"AttentionLayer": AttentionLayer}
         )
 
-        with open(tokenizer_path, "r", encoding="utf-8") as f:
+        with open(verify_artifact(tokenizer_path), "r", encoding="utf-8") as f:
             self.tokenizer = tokenizer_from_json(f.read())
 
-        with open(le_path, "rb") as f:
+        with open(verify_artifact(le_path), "rb") as f:
             self.le = pickle.load(f)
 
     def predict(self, text: str) -> dict:
@@ -59,6 +61,11 @@ class PayloadDetector:
         Predict attack type for a payload.
         Returns a dict with 'label' and 'confidence'.
         """
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        if len(text) > self.max_payload_length:
+            raise ValueError("payload too large")
+
         self._load_artifacts()
         
         seq = self.tokenizer.texts_to_sequences([text])

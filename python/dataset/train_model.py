@@ -3,7 +3,6 @@
 import os # used for working with files and folder paths
 import random  # generartes random values
 import json  # used for reading and writing json files
-import pickle   # used to save python objects
 import argparse  # parse command-line options
 import numpy as np   # used for numerical operations
 import pandas as pd   #used for reading csv files and data cleaning
@@ -30,7 +29,7 @@ from sklearn.metrics import classification_report, confusion_matrix  #to evaluat
 DATA_PATH = os.path.join(os.path.dirname(__file__), "payload_dataset1.csv")
 MODEL_OUT = os.path.join(os.path.dirname(__file__), "attack_cnn_lstm.h5")
 TOKENIZER_OUT = os.path.join(os.path.dirname(__file__), "tokenizer.json")
-LABEL_ENCODER_OUT = os.path.join(os.path.dirname(__file__), "label_encoder.pkl")
+LABEL_ENCODER_OUT = os.path.join(os.path.dirname(__file__), "label_encoder.json")
 
 # Default hyperparameters
 DEFAULT_MAX_NUM_WORDS = 20000
@@ -176,8 +175,8 @@ if __name__ == "__main__":
     le = LabelEncoder()
     y_enc = le.fit_transform(y)
 
-    with open(LABEL_ENCODER_OUT, "wb") as f:
-        pickle.dump(le, f)
+    with open(LABEL_ENCODER_OUT, "w", encoding="utf-8") as f:
+        json.dump(le.classes_.tolist(), f)
 
     # Split + upsample
     X_train, X_test, y_train, y_test = train_test_split(

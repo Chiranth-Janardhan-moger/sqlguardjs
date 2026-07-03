@@ -28,7 +28,6 @@
   "files": [
     "bin",
     "src",
-    "__tests__",
     "examples",
     "index.d.ts"
   ],

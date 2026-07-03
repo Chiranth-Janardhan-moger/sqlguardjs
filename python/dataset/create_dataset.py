@@ -1,6 +1,12 @@
 import pandas as pd
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 
 def load_payloads(path, label):
+    path = BASE_DIR / path
+    if not path.exists():
+        raise FileNotFoundError(f"payload source not found: {path}")
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         lines = [line.strip() for line in f if line.strip()]
     return pd.DataFrame({"payload": lines, "label": label})
@@ -14,7 +20,7 @@ df_benign = load_payloads("benign_payload.txt", "benign")
 df = pd.concat([df_sqli, df_xss, df_benign], ignore_index=True)
 
 # Save to CSV
-df.to_csv("payload_dataset1.csv", index=False)
+df.to_csv(BASE_DIR / "payload_dataset1.csv", index=False)
 
 print("CSV file created successfully!")
 print("Total samples:", len(df))

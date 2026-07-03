@@ -14,6 +14,6 @@ Supported releases receive security fixes. Users should upgrade to a supported v
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within SQLGuardJS, please do not disclose it publicly. Instead, submit an issue with the label `security` or contact the maintainer directly.
+If you discover a security vulnerability within SQLGuardJS, please do not disclose it publicly or open a public GitHub issue. Use GitHub private vulnerability reporting if it is available for the repository, or contact the maintainer directly.
 
 When possible, include the affected version, the payload or reproduction steps, the expected result, and the actual result.

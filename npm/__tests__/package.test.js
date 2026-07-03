@@ -20,7 +20,7 @@ describe('package metadata', () => {
   });
 
   it('should publish runtime files only', () => {
-    expect(pkg.files).toEqual(['bin', 'src', '__tests__', 'examples', 'index.d.ts']);
+    expect(pkg.files).toEqual(['bin', 'src', 'examples', 'index.d.ts']);
   });
 
   it('should expose TypeScript definitions and optional Express peer metadata', () => {

@@ -22,6 +22,44 @@ describe('IPRateLimiter class', () => {
     expect(limiter.ips.size).toBe(10);
     expect(limiter.ips.has('192.168.0.0')).toBe(false); // First elements get deleted
   });
+
+  it('should cap retained timestamps for a single key', () => {
+    const limiter = new IPRateLimiter(10000, 10, 3);
+
+    for (let i = 0; i < 10; i++) {
+      limiter.recordSuspicious('1.1.1.1');
+    }
+
+    expect(limiter.recordSuspicious('1.1.1.1')).toBe(3);
+    expect(limiter.ips.get('1.1.1.1')).toHaveLength(3);
+  });
+
+  it('should prune expired keys before evicting active keys', () => {
+    const limiter = new IPRateLimiter(100, 2);
+    const realDateNow = Date.now.bind(global.Date);
+    global.Date.now = jest.fn(() => 1000);
+    limiter.recordSuspicious('old');
+    global.Date.now = jest.fn(() => 1200);
+    limiter.recordSuspicious('active');
+    limiter.recordSuspicious('new');
+    global.Date.now = realDateNow;
+
+    expect(limiter.ips.has('old')).toBe(false);
+    expect(limiter.ips.has('active')).toBe(true);
+    expect(limiter.ips.has('new')).toBe(true);
+  });
+
+  it('should evict the least recently used key when full', () => {
+    const limiter = new IPRateLimiter(10000, 2);
+    limiter.recordSuspicious('a');
+    limiter.recordSuspicious('b');
+    limiter.recordSuspicious('a');
+    limiter.recordSuspicious('c');
+
+    expect(limiter.ips.has('a')).toBe(true);
+    expect(limiter.ips.has('b')).toBe(false);
+    expect(limiter.ips.has('c')).toBe(true);
+  });
 });
 
 describe('Rate Limiter Middleware Integration', () => {
@@ -38,28 +76,19 @@ describe('Rate Limiter Middleware Integration', () => {
 
   it('should block an IP after multiple ambiguous payloads', async () => {
     const middleware = expressMiddleware({ maxSuspiciousRequests: 3, threshold: 0.6 });
-    const req = {
+    const createReq = () => ({
       ip: '2.2.2.2',
-      query: { q: 'union' } // 'union' scores 0.35 if it hits some sub-heuristic or 0.2? Wait, the regex is union select. 
-      // Let's just use something we know triggers 0.2 - 0.7.
-      // Wait, let's look at detector.js: 
-      // 'UNION' alone won't trigger sqliScore because regex is \b(?:UNION\s+(?:ALL\s+)?SELECT|...
-    };
-    
-    // To trigger an ambiguous payload, we need a confidence between 0.2 and 0.5.
-    // Each matched pattern adds 1 to the score, so maxScore * 0.35.
-    // maxScore = 1 => 0.35.
-    // Let's match one xss pattern: javascript:
-    req.query.q = 'javascript:'; 
+      query: { q: 'javascript:' }
+    });
 
     for (let i = 0; i < 2; i++) {
-      await middleware(req, mockRes, mockNext);
+      await middleware(createReq(), mockRes, mockNext);
       expect(mockNext).toHaveBeenCalledTimes(i + 1);
       expect(mockRes.status).not.toHaveBeenCalled();
     }
 
     // 3rd time should block
-    await middleware(req, mockRes, mockNext);
+    await middleware(createReq(), mockRes, mockNext);
     expect(mockRes.status).toHaveBeenCalledWith(403);
     expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
       message: 'Malicious payload detected by SQLGuardJS',
@@ -74,24 +103,24 @@ describe('Rate Limiter Middleware Integration', () => {
       rateLimitKey: req => req.headers['x-user-id'] || req.ip
     });
 
-    const firstUserReq = {
+    const firstUserReq = () => ({
       ip: '10.0.0.10',
       headers: { 'x-user-id': 'user-a' },
       query: { q: 'javascript:' }
-    };
+    });
     const secondUserReq = {
       ip: '10.0.0.10',
       headers: { 'x-user-id': 'user-b' },
       query: { q: 'javascript:' }
     };
 
-    await middleware(firstUserReq, mockRes, mockNext);
+    await middleware(firstUserReq(), mockRes, mockNext);
     await middleware(secondUserReq, mockRes, mockNext);
 
     expect(mockRes.status).not.toHaveBeenCalled();
     expect(mockNext).toHaveBeenCalledTimes(2);
 
-    await middleware(firstUserReq, mockRes, mockNext);
+    await middleware(firstUserReq(), mockRes, mockNext);
 
     expect(mockRes.status).toHaveBeenCalledWith(403);
     expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({

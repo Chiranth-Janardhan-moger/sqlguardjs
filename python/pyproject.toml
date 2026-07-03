@@ -6,18 +6,37 @@ build-backend = "setuptools.build_meta"
 name = "sqlguardjs"
 version = "1.0.1"
 description = "SQLGuardJS Python reference detector"
+requires-python = ">=3.10"
 dependencies = [
-    "tensorflow",
-    "keras>=3.15.0",
-    "numpy",
-    "fastapi",
-    "uvicorn",
-    "scikit-learn"
+    "tensorflow>=2.16,<3",
+    "keras>=3.15.0,<4",
+    "numpy>=1.26,<3",
+    "fastapi>=0.111,<1",
+    "uvicorn>=0.30,<1",
+    "scikit-learn>=1.4,<2"
+]
+
+[project.optional-dependencies]
+dataset = [
+    "pandas>=2.2,<3"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sqlguardjs = [
+    "models/attack_cnn_lstm.h5",
+    "models/tokenizer.json",
+    "models/label_encoder.pkl",
+    "models/stub_model.pkl",
+    "models/stub_vectorizer.pkl"
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
 
 [project.scripts]
 sqlguardjs = "sqlguardjs.cli:main"

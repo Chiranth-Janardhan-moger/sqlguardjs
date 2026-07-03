@@ -106,6 +106,7 @@ export interface ExpressMiddlewareOptions {
   rateLimitWindowMs?: number;
   maxSuspiciousRequests?: number;
   maxRateLimitCapacity?: number;
+  maxRateLimitEventsPerKey?: number;
   rateLimitKey?: (req: any) => string | null | undefined | Promise<string | null | undefined>;
   dryRun?: boolean;
   logAttacks?: boolean | ((messageOrEvent: string | SqlGuardJSLogEvent, event?: SqlGuardJSLogEvent) => void | Promise<void>);
@@ -160,6 +161,53 @@ export interface SqlGuardJSInstance {
   middleware(overrides?: ExpressMiddlewareOptions): RequestHandler;
 }
 
+export interface SqlQueryGuardOptions {
+  threshold?: number;
+  maxPayloadLength?: number;
+  maxDecodeIterations?: number;
+  detector?: Detector;
+}
+
+export interface PayloadEvaluationSample {
+  payload?: unknown;
+  text?: unknown;
+  value?: unknown;
+  label?: string;
+  expected?: string;
+  kind?: string;
+}
+
+export interface PayloadEvaluationResult {
+  payload: string;
+  expectedMalicious: boolean | null;
+  blocked: boolean;
+  result: DetectionResult;
+}
+
+export interface PayloadEvaluationReport {
+  threshold: number;
+  summary: {
+    total: number;
+    blocked: number;
+    allowed: number;
+    labeled: number;
+    falsePositives: number;
+    falseNegatives: number;
+    truePositives: number;
+    trueNegatives: number;
+    falsePositiveRate: number;
+    falseNegativeRate: number;
+  };
+  results: PayloadEvaluationResult[];
+}
+
+export class SqlGuardJSQueryError extends Error {
+  result: DetectionResult;
+}
+
+export function scanSqlQuery(query: string, options?: SqlQueryGuardOptions): DetectionResult;
+export function assertSafeSqlQuery(query: string, options?: SqlQueryGuardOptions): DetectionResult;
+export function evaluatePayloads(samples: Array<string | PayloadEvaluationSample>, options?: SqlQueryGuardOptions): PayloadEvaluationReport;
 export function expressMiddleware(options?: ExpressMiddlewareOptions): RequestHandler;
 export function sqlguardjs(options?: ExpressMiddlewareOptions): SqlGuardJSInstance;
 export function secureRouter(options?: SecureRouterOptions): any;
