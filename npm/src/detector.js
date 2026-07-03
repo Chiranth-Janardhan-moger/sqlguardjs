@@ -1,40 +1,190 @@
 const { IPRateLimiter } = require('./rateLimiter');
 
+const DEFAULT_THRESHOLD = 0.5;
+const DEFAULT_SUSPICIOUS_THRESHOLD = 0.2;
+const DEFAULT_MAX_PAYLOAD_LENGTH = 50000;
+const DEFAULT_MAX_DEPTH = 20;
+const DEFAULT_MAX_FIELDS = 1000;
+const DEFAULT_MAX_ML_CALLS = 10;
+const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*)';
+
+const sqlWord = (word) => word.split('').join('[\\s\\u00a0]*');
+
+function hasRepeatedQuotedLiteralComparison(value) {
+  const comparison = /(['"])([^'"]{1,80})\1\s*=\s*(['"])([^'"]{1,80})\3/g;
+  let match;
+  while ((match = comparison.exec(value)) !== null) {
+    if (match[2] === match[4]) return true;
+  }
+  return false;
+}
+
+function truncateForLog(value, maxLength = 500) {
+  const text = String(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...[truncated ${text.length - maxLength} chars]`;
+}
+
 class Detector {
-  constructor() {
-    this.sqliPatterns = [
-      /(?:['";\)]\s*\b(?:OR|AND)\b\s+[\w\d'"]+\s*[=<>])/i,
-      /\bUNION\s+(?:ALL\s+)?SELECT\b/i,
-      /(?:;\s*\bDROP\s+TABLE\b|\bDROP\s+TABLE\s+\w+\s*;)/i,
-      /\bINSERT\s+INTO\s+\w+\s*(?:\([^)]*\)\s*)?VALUES/i,
-      /\bUPDATE\s+\w+\s+SET\s+\w+\s*=/i,
-      /;\s*(?:SLEEP|DELAY|WAITFOR)\s*(?:\(|\s)/i,
-      /(?:\$where|\$ne|\$gt|\$lt|\$gte|\$lte|\$in|\$nin|\$regex)/i,
-      /['"]\s*=\s*['"]/i,
-      /(?:['"]\s*(?:--|#)(?:\s|$))/i
+  constructor(options = {}) {
+    this.maxPayloadLength = options.maxPayloadLength || DEFAULT_MAX_PAYLOAD_LENGTH;
+    this.sqliSignals = [
+      {
+        id: 'union-select',
+        confidence: 0.8,
+        pattern: /\bUNION\s+(?:ALL\s+)?SELECT\b/i
+      },
+      {
+        id: 'comment-fragmented-union-select',
+        confidence: 0.8,
+        pattern: new RegExp(`\\b${sqlWord('UNION')}\\s+(?:${sqlWord('ALL')}\\s+)?${sqlWord('SELECT')}\\b`, 'i')
+      },
+      {
+        id: 'boolean-tautology',
+        confidence: 0.75,
+        pattern: /(?:['"`)]\s*(?:OR|AND)\s+(?:\d+\s*(?:=|LIKE)\s*\d+|['"][^'"]{0,80}['"]\s*=\s*['"][^'"]{0,80}['"]?|[A-Za-z_][\w.]*\s*(?:=|LIKE)\s*['"\d])|\b\d+\s+(?:OR|AND)\s+\d+\s*=\s*\d+)/i
+      },
+      {
+        id: 'drop-table',
+        confidence: 0.75,
+        pattern: new RegExp(`(?:^|[;\\s])DROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?${SQL_IDENTIFIER}\\s*(?:CASCADE\\s*|RESTRICT\\s*)?(?:;|--|#|$)`, 'i')
+      },
+      {
+        id: 'insert-values',
+        confidence: 0.7,
+        pattern: new RegExp(`\\bINSERT\\s+INTO\\s+${SQL_IDENTIFIER}\\s*(?:\\([^)]*\\)\\s*)?VALUES\\s*\\(`, 'i')
+      },
+      {
+        id: 'update-set',
+        confidence: 0.7,
+        pattern: new RegExp(`\\bUPDATE\\s+${SQL_IDENTIFIER}\\s+SET\\s+${SQL_IDENTIFIER}\\s*=`, 'i')
+      },
+      {
+        id: 'delete-from',
+        confidence: 0.65,
+        pattern: new RegExp(`\\bDELETE\\s+FROM\\s+${SQL_IDENTIFIER}\\s*(?:WHERE\\b|;|--|#|$)`, 'i')
+      },
+      {
+        id: 'stacked-sql-statement',
+        confidence: 0.65,
+        pattern: /;\s*(?:SELECT|UNION|DROP|INSERT|UPDATE|DELETE|ALTER|CREATE|EXEC|EXECUTE)\b/i
+      },
+      {
+        id: 'sql-comment-breakout',
+        confidence: 0.55,
+        pattern: /(?:['"`]\s*(?:--|#)(?:\s|$)|--\s*$|#\s*$)/i
+      },
+      {
+        id: 'time-delay',
+        confidence: 0.75,
+        pattern: /\b(?:SLEEP\s*\(|WAITFOR\s+DELAY\b|BENCHMARK\s*\(|PG_SLEEP\s*\()/i
+      },
+      {
+        id: 'nosql-operator',
+        confidence: 0.65,
+        pattern: /(?:^|[{,\s])["']?\$(?:where|ne|gt|lt|gte|lte|in|nin|regex|expr|or|and)["']?\s*:/i
+      },
+      {
+        id: 'nosql-operator-key',
+        confidence: 0.65,
+        pattern: /^\$(?:where|ne|gt|lt|gte|lte|in|nin|regex|expr|or|and)$/i
+      },
+      {
+        id: 'repeated-quoted-literal-comparison',
+        confidence: 0.3,
+        test: hasRepeatedQuotedLiteralComparison
+      },
+      {
+        id: 'sql-metadata-probe',
+        confidence: 0.45,
+        pattern: /\b(?:information_schema|sysobjects|sys\.tables|sqlite_master|pg_catalog)\b/i
+      }
     ];
-    this.xssPatterns = [
-      /<script\b/i,
-      /<[^>]+(on\w+)\s*=/i,
-      /\bon\w+\s*=\s*["']?[^"'>]*(?:alert|document\.|window\.|eval|fetch)/i,
-      /javascript:/i,
-      /<(?:iframe|object|embed|applet)\b/i
+    this.xssSignals = [
+      {
+        id: 'script-tag',
+        confidence: 0.85,
+        pattern: /<\s*script\b/i
+      },
+      {
+        id: 'html-event-attribute',
+        confidence: 0.75,
+        pattern: /<[^>]+\bon\w+\s*=/i
+      },
+      {
+        id: 'event-handler-payload',
+        confidence: 0.75,
+        pattern: /\bon\w+\s*=\s*["']?[^"'>]*(?:alert|confirm|prompt|document\.|window\.|eval|fetch|Function\s*\()/i
+      },
+      {
+        id: 'javascript-url-with-sink',
+        confidence: 0.75,
+        pattern: /\bjavascript\s*:\s*(?:alert|confirm|prompt|document\.|window\.|eval|fetch|Function\s*\()/i
+      },
+      {
+        id: 'javascript-url',
+        confidence: 0.3,
+        pattern: /\bjavascript\s*:/i
+      },
+      {
+        id: 'dangerous-html-container',
+        confidence: 0.7,
+        pattern: /<\s*(?:iframe|object|embed|applet)\b/i
+      },
+      {
+        id: 'srcdoc-html',
+        confidence: 0.65,
+        pattern: /\bsrcdoc\s*=/i
+      },
+      {
+        id: 'html-data-url',
+        confidence: 0.65,
+        pattern: /\bdata\s*:\s*text\/html/i
+      }
     ];
   }
 
   decodeDeeply(payload) {
+    return this.normalizePayload(payload, { sqlCommentMode: 'space' });
+  }
+
+  normalizePayload(payload, { sqlCommentMode = 'space' } = {}) {
+    if (Buffer.isBuffer(payload)) payload = payload.toString('utf8');
     if (typeof payload !== 'string') return '';
-    if (payload.length > 50000) payload = payload.substring(0, 50000);
-    const namedEntities = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' };
+    if (payload.length > this.maxPayloadLength) payload = payload.substring(0, this.maxPayloadLength);
+    const namedEntities = {
+      lt: '<',
+      gt: '>',
+      quot: '"',
+      apos: "'",
+      amp: '&',
+      colon: ':',
+      sol: '/',
+      equals: '=',
+      lpar: '(',
+      rpar: ')',
+      tab: '\t',
+      newline: '\n',
+      grave: '`'
+    };
     const decodeEntity = (match, hex, dec) => {
       const code = parseInt(hex || dec, hex ? 16 : 10);
       return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : match;
     };
-    const normalize = (value) => value
-      .replace(/%u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-      .replace(/&#x([0-9a-fA-F]+);?|&#(\d+);?/g, decodeEntity)
-      .replace(/&(lt|gt|quot|apos|amp);/gi, (_, name) => namedEntities[name.toLowerCase()])
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+    const normalize = (value) => {
+      let normalized = value
+        .replace(/%u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/&#x([0-9a-fA-F]+);?|&#(\d+);?/g, decodeEntity)
+        .replace(/&([a-zA-Z][a-zA-Z0-9]+);/g, (match, name) => namedEntities[name.toLowerCase()] ?? match)
+        .replace(/[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/g, ' ')
+        .replace(/[\u200b-\u200d\ufeff]/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+      try {
+        normalized = normalized.normalize('NFKC');
+      } catch (e) {}
+      return normalized;
+    };
 
     // Iterate decoding to catch multi-layer encoding
     let decoded = normalize(payload);
@@ -57,59 +207,131 @@ class Detector {
         }
       } catch (e) {}
     }
-    // Remove SQL inline comments (e.g. /**/) to prevent UN/**/ION bypasses
-    decoded = decoded.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Preserve SQL block comments as separators so UNION/**/SELECT stays tokenized.
+    // Detection also checks a removal variant to catch mid-keyword splits such as UN/**/ION.
+    decoded = decoded.replace(/\/\*[\s\S]*?\*\//g, sqlCommentMode === 'remove' ? '' : ' ');
     return decoded;
   }
 
+  payloadVariants(payload) {
+    const variants = [
+      this.normalizePayload(payload, { sqlCommentMode: 'space' }),
+      this.normalizePayload(payload, { sqlCommentMode: 'remove' })
+    ];
+    return [...new Set(variants.filter(Boolean))];
+  }
+
+  matchSignals(variants, signalDefinitions, label) {
+    const matchesById = new Map();
+    for (const variant of variants) {
+      for (const signal of signalDefinitions) {
+        const matched = signal.pattern ? signal.pattern.test(variant) : signal.test(variant);
+        if (!matched || matchesById.has(signal.id)) continue;
+        matchesById.set(signal.id, {
+          id: signal.id,
+          label,
+          confidence: signal.confidence
+        });
+      }
+    }
+    return [...matchesById.values()];
+  }
+
+  combineConfidence(matches) {
+    return Math.min(1.0, matches.reduce((total, match) => total + match.confidence, 0));
+  }
+
   detect(payload) {
-    const decodedPayload = this.decodeDeeply(payload);
-    const sqliScore = this.sqliPatterns.filter(p => p.test(decodedPayload)).length;
-    const xssScore = this.xssPatterns.filter(p => p.test(decodedPayload)).length;
-    const maxScore = Math.max(sqliScore, xssScore);
-    const confidence = Math.min(1.0, maxScore * 0.5);
-    const label = sqliScore > xssScore ? 'sqli' : xssScore > 0 ? 'xss' : 'benign';
-    return { label, confidence, scores: { sqli: sqliScore, xss: xssScore } };
+    const variants = this.payloadVariants(payload);
+    const sqliMatches = this.matchSignals(variants, this.sqliSignals, 'sqli');
+    const xssMatches = this.matchSignals(variants, this.xssSignals, 'xss');
+    const sqliConfidence = this.combineConfidence(sqliMatches);
+    const xssConfidence = this.combineConfidence(xssMatches);
+    const confidence = Math.max(sqliConfidence, xssConfidence);
+    const label = confidence === 0 ? 'benign' : (sqliConfidence >= xssConfidence ? 'sqli' : 'xss');
+
+    return {
+      label,
+      confidence,
+      scores: { sqli: sqliMatches.length, xss: xssMatches.length },
+      matches: [...sqliMatches, ...xssMatches]
+    };
   }
 }
 
 function expressMiddleware(options = {}) {
-  const detector = new Detector();
-  const threshold = options.threshold || 0.5;
+  const detector = options.detector || new Detector({ maxPayloadLength: options.maxPayloadLength });
+  const threshold = options.threshold ?? DEFAULT_THRESHOLD;
+  const suspiciousThreshold = options.suspiciousThreshold ?? DEFAULT_SUSPICIOUS_THRESHOLD;
   const mlEndpoint = options.mlEndpoint || null; 
   const rateLimiter = new IPRateLimiter(options.rateLimitWindowMs || 300000, options.maxRateLimitCapacity || 10000);
   const maxSuspiciousRequests = options.maxSuspiciousRequests || 3;
+  const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const maxFields = options.maxFields ?? DEFAULT_MAX_FIELDS;
+  const maxMlCalls = options.maxMlCalls ?? DEFAULT_MAX_ML_CALLS;
+  const blockStatus = options.blockStatus ?? 403;
+  const dryRun = options.dryRun === true;
+  const scanHeaders = options.scanHeaders !== false;
+  const scanCookies = options.scanCookies !== false;
+  const scanParams = options.scanParams !== false;
+  const scanKeys = options.scanKeys !== false;
+  const skip = typeof options.skip === 'function' ? options.skip : null;
+  const onThreat = typeof options.onThreat === 'function' ? options.onThreat : null;
   const logger = typeof options.logAttacks === 'function' ? options.logAttacks : (options.logAttacks ? console.warn : () => {});
 
-  const logAttack = (ip, payload, label) => {
-    logger(`[SQLGuard] Attack Blocked: ${label} from IP: ${ip} | Payload: ${payload}`);
+  const logAttack = (ip, payload, detection) => {
+    logger(`[SQLGuard] ${dryRun ? 'Attack Observed' : 'Attack Blocked'}: ${detection.label} from IP: ${ip} | path: ${detection.path} | confidence: ${detection.confidence} | Payload: ${truncateForLog(payload)}`);
   };
 
   return async (req, res, next) => {
-    const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
-    // BUG FIX 1: Scan params and cookies too!
-    const sources = [req.query, req.body, req.headers, req.params, req.cookies];
-    
-    // BUG FIX 3: Prevent ML-driven Resource Exhaustion DoS
-    let mlCallCount = 0;
-    const MAX_ML_CALLS = 10;
+    if (skip && skip(req)) return next();
 
-    const scanString = async (str) => {
+    const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+    const sources = [
+      ['query', req.query],
+      ['body', req.body]
+    ];
+    if (scanHeaders) sources.push(['headers', req.headers]);
+    if (scanParams) sources.push(['params', req.params]);
+    if (scanCookies) sources.push(['cookies', req.cookies]);
+    
+    let mlCallCount = 0;
+    let scannedFields = 0;
+
+    const reportDetection = (payload, detection) => {
+      req.sqlguard = {
+        detected: true,
+        dryRun,
+        label: detection.label,
+        confidence: detection.confidence,
+        path: detection.path,
+        matches: detection.matches || []
+      };
+      if (onThreat) onThreat(req.sqlguard, req);
+      logAttack(ip, payload, detection);
+      return { isMalicious: true, label: detection.label };
+    };
+
+    const scanString = async (str, path) => {
+      if (typeof str !== 'string' || str.length === 0) return false;
       const result = detector.detect(str);
       let finalLabel = result.label;
+      let finalConfidence = result.confidence;
       let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
 
-      if (!isMalicious && result.confidence >= 0.2) {
+      if (!isMalicious && result.label !== 'benign' && result.confidence >= suspiciousThreshold) {
         const suspiciousCount = rateLimiter.recordSuspicious(ip);
         if (suspiciousCount >= maxSuspiciousRequests) {
            isMalicious = true;
            finalLabel = "rate_limit_escalation";
+           finalConfidence = threshold;
            logger(`[SQLGuard] IP ${ip} blocked due to repeated ambiguous probes.`);
         } else if (mlEndpoint) {
-          if (mlCallCount >= MAX_ML_CALLS) {
+          if (mlCallCount >= maxMlCalls) {
              // Fallback to strict heuristic if attacker is spamming borderline payloads
              isMalicious = true; 
              finalLabel = "rate_limit_sqli_heuristic";
+             finalConfidence = threshold;
           } else {
             mlCallCount++;
             try {
@@ -120,9 +342,10 @@ function expressMiddleware(options = {}) {
               });
               if (mlRes.ok) {
                 const mlData = await mlRes.json();
-                if (mlData.label && mlData.label !== 'benign') {
+                if ((mlData.label && mlData.label !== 'benign') || mlData.isMalicious === true) {
                   isMalicious = true;
-                  finalLabel = mlData.label;
+                  finalLabel = mlData.label || 'ml_detected';
+                  finalConfidence = Math.max(finalConfidence, mlData.confidence || threshold);
                 }
               }
             } catch (e) {
@@ -133,52 +356,65 @@ function expressMiddleware(options = {}) {
       }
 
       if (isMalicious) {
-        logAttack(ip, str, finalLabel);
-        return { isMalicious: true, label: finalLabel };
+        return reportDetection(str, {
+          label: finalLabel,
+          confidence: finalConfidence,
+          path,
+          matches: result.matches
+        });
       }
       return false;
     };
 
-    // BUG FIX 2: Add Depth Limit to prevent Stack Overflow DoS
-    const deepScan = async (obj, currentDepth = 0) => {
+    const deepScan = async (obj, path, currentDepth = 0, seen = new WeakSet()) => {
       if (!obj || typeof obj !== 'object') return false;
-      if (currentDepth > 20) {
-         logAttack(ip, "[JSON Depth Exceeded]", "dos");
+      if (currentDepth > maxDepth) {
+         logAttack(ip, "[JSON Depth Exceeded]", { label: "dos", confidence: 1, path });
          return { isMalicious: true, label: 'dos' };
       }
+      if (seen.has(obj)) return false;
+      seen.add(obj);
 
       for (const [key, val] of Object.entries(obj)) {
-        const keyAttack = await scanString(key);
+        scannedFields++;
+        if (scannedFields > maxFields) {
+          logAttack(ip, "[Field Limit Exceeded]", { label: "dos", confidence: 1, path });
+          return { isMalicious: true, label: 'dos' };
+        }
+
+        const childPath = Array.isArray(obj) ? `${path}[${key}]` : `${path}.${key}`;
+        const keyAttack = scanKeys ? await scanString(key, `${childPath}.__key`) : false;
         if (keyAttack) return keyAttack;
 
         if (typeof val === 'string') {
-          const valAttack = await scanString(val);
+          const valAttack = await scanString(val, childPath);
           if (valAttack) return valAttack;
         } else if (Buffer.isBuffer(val)) {
-          const valAttack = await scanString(val.toString('utf8'));
+          const valAttack = await scanString(val.toString('utf8'), childPath);
           if (valAttack) return valAttack;
         } else if (typeof val === 'object' && val !== null) {
-          const nestedAttack = await deepScan(val, currentDepth + 1);
+          const nestedAttack = await deepScan(val, childPath, currentDepth + 1, seen);
           if (nestedAttack) return nestedAttack;
         }
       }
       return false;
     };
 
-    for (const source of sources) {
+    for (const [sourceName, source] of sources) {
       if (!source) continue;
       
       let attack = false;
       if (Buffer.isBuffer(source)) {
-         attack = await scanString(source.toString('utf8'));
+         attack = await scanString(source.toString('utf8'), sourceName);
       } else if (typeof source === 'string') {
-         attack = await scanString(source);
+         attack = await scanString(source, sourceName);
       } else if (typeof source === 'object') {
-         attack = await deepScan(source);
+         attack = await deepScan(source, sourceName);
       }
 
       if (attack) {
-        return res.status(403).json({
+        if (dryRun) return next();
+        return res.status(blockStatus).json({
           error: 'Forbidden',
           message: 'Malicious payload detected by SQLGuard ML',
           details: { label: attack.label }

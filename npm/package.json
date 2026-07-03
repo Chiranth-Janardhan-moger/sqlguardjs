@@ -1,11 +1,29 @@
 {
   "name": "sqlguard-ml",
-  "version": "1.0.0",
-  "description": "Heuristic detector for SQL injection and XSS",
+  "version": "1.0.2",
+  "description": "Express middleware and CLI scanner for SQL injection, NoSQL injection, and XSS payloads",
   "main": "src/detector.js",
   "bin": {
     "sqlguard-ml": "bin/sqlguard-ml.js"
   },
+  "keywords": [
+    "security",
+    "express",
+    "middleware",
+    "waf",
+    "sql-injection",
+    "xss",
+    "nosql-injection"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chiranth-Janardhan-moger/sqlguard-ml.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Chiranth-Janardhan-moger/sqlguard-ml/issues"
+  },
+  "homepage": "https://github.com/Chiranth-Janardhan-moger/sqlguard-ml#readme",
+  "license": "MIT",
   "files": [
     "bin",
     "src",

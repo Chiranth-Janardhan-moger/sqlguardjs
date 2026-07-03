@@ -1,118 +1,30 @@
-# SQLGuard ML (Machine Learning Injection Detector)
+# SQLGuard ML
 
-<div align="center">
-  <img src="https://img.shields.io/npm/v/sqlguard-ml?color=blue&style=for-the-badge" alt="NPM Version">
-  <img src="https://img.shields.io/github/actions/workflow/status/Chiranth-Janardhan-moger/sqlguard-ml/ci.yml?branch=main&style=for-the-badge" alt="CI Status">
-</div>
+SQLGuard ML is a Node.js and Express request-inspection package for common SQL injection, NoSQL injection, and cross-site scripting payloads. It provides a fast heuristic detector, Express middleware, a command-line scanner, and an optional HTTP bridge for a second-opinion model.
 
-> **Hybrid SQL Injection (SQLi) and Cross-Site Scripting (XSS) detection engine.** Includes a Node.js heuristic scanner and an Express.js middleware that can bridge to a local Python FastAPI Machine Learning service.
-
----
-
-## 🚀 Latest Release: v1.0.0
-
-When I first started this project, the goal was simple: stop SQL Injection and XSS before it hits the database. Over the past few days, the project underwent intense iterative testing to catch and fix critical bypasses, moving it from a broken experimental package into a functional heuristic Web Application Firewall (WAF) for Express.js.
-
-If you are running a Node/Express backend and want a plug-and-play heuristic engine to block common payload attacks, SQLGuard-ML now works end-to-end.
-
-### 🛡️ What it actually does
-We've fundamentally rewritten the core engine to ensure it catches real attacks without blocking benign text. The heuristic layer features:
-
-* **Recursive multi-layer decoder** (URL, double-URL, Base64, HTML entities, %uXXXX, null bytes)
-* **SQL inline comment stripping** before pattern matching
-* **Header and raw Buffer body scanning**
-* **34 self-tests passing** (covering all known adversarial bypasses we threw at it)
-* **Tested against 20+ benign payloads** without false positives
-
-*(Note: The repository also contains a Python ML bridge and IP rate limiter, but they act strictly as proof-of-concept stubs. Out of the box, this is a two-tier system: Benign or Blocked).*
-
-## Quick Start (Node.js)
-
-Install the package via NPM:
-
-```bash
-npm install sqlguard-ml
-```
-
-See the [Usage](#-usage) section below for how to integrate it into Express.js!
-
----
-
-## Overview
-
-**SQLGuard ML** is a cybersecurity tool for detecting SQL Injection (SQLi) and Cross-Site Scripting (XSS). 
-The Node.js package (`npm`) operates using a fast heuristic (regex-based) scanner. If you need a Machine Learning second opinion for borderline payloads, you can spin up the included Python FastAPI server locally to run the CNN-LSTM deep learning model.
+SQLGuard ML is a defense-in-depth control. It does not replace parameterized SQL queries, safe ORM usage, context-aware output encoding, HTML sanitization, CSP, least-privilege database accounts, or application security testing.
 
 ## Features
 
-- **Hybrid AI Bridge**: Automatically queries a local Python Machine Learning engine for a second opinion on borderline payloads to reduce false positives (requires running the Python server).
-- **Deep Payload Decoding**: Unravels multi-layer URL encoding, Hex, and Base64 payloads before scanning to catch obfuscated attacks.
-- **Express.js Middleware**: Plug-and-play middleware that automatically scans `req.query`, `req.body`, and `req.headers`.
-- **Intelligent Header Scanning**: Deeply scans headers like `User-Agent`, `Referer`, and `X-Forwarded-For`, as well as raw text buffers to catch evasion attempts.
-- **IP Reputation & Rate Limiting**: Tracks IP behavior with a sliding window to escalate suspicion if an attacker spams multiple borderline/ambiguous payloads. *(Note: This uses an in-memory Map, so state resets on server restart and is not shared across Node.js clusters/Kubernetes pods).*
-- **ReDoS Protection**: Enforces strict payload length caps to prevent Regular Expression Denial of Service.
-- **Comment Stripping**: Removes SQL inline comments to prevent common obfuscation bypasses (e.g. `UN/**/ION`).
-
-## Architectural Limitations (Please Read)
-
-- **Rate Limiting in PM2/Kubernetes**: The IP rate limiter runs in-process via an in-memory Map. This means it **resets on every server restart** and **does not share state across multiple Node processes**. If you are running PM2 clusters, Kubernetes pods, or any multi-instance deployment, rate limiting will be silently isolated per-instance. For true distributed rate limiting, layer a WAF or Redis-backed solution upstream.
-- **Two-Tier Reality (Out of the Box)**: Because the heuristic engine now returns a strict `0.5` confidence for single pattern matches and the default block threshold is `0.5`, the middleware effectively operates as a strict two-tier system (Benign `0.0` or Blocked `0.5+`). The "ambiguous zone" (`0.2` to `0.49`) is practically empty. This means the **ML Bridge and Rate Limiter escalation will never fire by default**. If you want to use the three-tier architecture, you must manually raise the `threshold` option to `0.6` or higher so that single-pattern heuristic matches fall into the ambiguous zone.
-- **ML Bridge is a Reference Implementation**: The architecture for querying an ML model is real and fully functional, but the included Python "AI" half is currently a **stub / proof-of-concept**. If you enable the `mlEndpoint`, you are expected to bring your own trained, production-ready model. The out-of-the-box Python script is for demonstration purposes only.
-
----
+- Detects SQL injection patterns including boolean tautologies, `UNION SELECT`, stacked statements, destructive DDL, time-delay probes, and metadata enumeration.
+- Handles SQL comment evasion, including `UNION/**/SELECT` and `UN/**/ION SEL/**/ECT`.
+- Detects NoSQL operator probes such as `$where`, `$ne`, `$gt`, `$regex`, `$or`, and `$and`.
+- Detects XSS payloads including script tags, event-handler attributes, JavaScript execution URLs, dangerous HTML containers, `srcdoc`, and `data:text/html`.
+- Normalizes repeated URL encoding, `%uXXXX`, HTML entities, printable Base64, plus-separated query strings, Unicode spacing, zero-width characters, and control-character splitting.
+- Scans `req.query`, `req.body`, `req.headers`, `req.params`, `req.cookies`, nested objects, arrays, object keys, strings, and Buffers.
+- Supports weighted confidence scoring, suspicious request escalation, dry-run rollout, route skipping, structured detection callbacks, and request-size safety limits.
 
 ## Installation
 
-### Node.js / NPM (Heuristic Scanner)
-
-To install the heuristic library in your project:
 ```bash
 npm install sqlguard-ml
 ```
 
-### Python (Machine Learning Detector)
+Node.js 18 or newer is required.
 
-Currently, the `sqlguard-ml` Python package provides a lightweight FastAPI stub model using Scikit-Learn for the Hybrid Bridge. You must build and install it locally from this repository.
+## Express Usage
 
-```bash
-cd python
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e .
-python src/sqlguard_ml/train_stub.py
-uvicorn src.sqlguard_ml.api:app --reload
-```
-
-*(Note: This provides the 'second opinion' endpoint that the Node.js middleware bridges to).*
-
----
-
-## Usage
-
-### Using the NPM Package (`sqlguard-ml`)
-Once installed, you can use the Node CLI from anywhere:
-
-```bash
-# Scan a single payload
-sqlguard-ml scan "<script>alert('XSS')</script>"
-
-# Scan a file of payloads and output as CSV
-sqlguard-ml scan-file payloads.txt --format csv
-```
-
-**As a Node.js Library:**
-```javascript
-const { Detector } = require('sqlguard-ml');
-
-const detector = new Detector();
-const result = detector.detect("' OR 1=1 --");
-
-console.log(result.label); // 'sqli'
-console.log(result.confidence);
-```
-
-### Using as Express.js Middleware (Advanced)
-You can easily protect your Express.js applications by plugging in the `expressMiddleware`. It supports a Hybrid AI bridge to reduce false positives.
+Register SQLGuard ML after body parsers and before protected routes.
 
 ```javascript
 const express = require('express');
@@ -120,59 +32,246 @@ const { expressMiddleware } = require('sqlguard-ml');
 
 const app = express();
 
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
 app.use(expressMiddleware({
   threshold: 0.5,
-  mlEndpoint: 'http://127.0.0.1:8000/api/detect' // Optional: Fallback to Python AI for borderline payloads
+  suspiciousThreshold: 0.2,
+  logAttacks: true
 }));
 
-app.get('/api/data', (req, res) => {
-  res.send("If you see this, your request was safe!");
+app.post('/login', (req, res) => {
+  res.json({ ok: true });
 });
 
 app.listen(3000);
 ```
 
-### Using the Python ML Package (`sqlguard`)
-Once installed via pip, the Python CLI is immediately available:
+## Production Rollout
+
+Start with `dryRun: true` on real traffic. This records detections without blocking requests.
+
+```javascript
+app.use(expressMiddleware({
+  dryRun: true,
+  onThreat(event, req) {
+    console.warn({
+      label: event.label,
+      confidence: event.confidence,
+      path: event.path,
+      ip: req.ip
+    });
+  }
+}));
+```
+
+After reviewing logs and tuning any route exclusions, enable blocking.
+
+```javascript
+app.use(expressMiddleware({
+  dryRun: false,
+  threshold: 0.5,
+  skip: req => req.path === '/health'
+}));
+```
+
+## Thresholds
+
+`threshold` is the confidence score at which a request is blocked. It is a weighted heuristic score, not a machine-learning probability.
+
+- `0`: no signal matched.
+- `0.2` to below `threshold`: suspicious. The request is allowed by default, but repeated suspicious requests can escalate, and `mlEndpoint` can provide a second opinion.
+- `threshold` and above: blocked unless `dryRun` is enabled.
+
+Defaults:
+
+```javascript
+expressMiddleware({
+  threshold: 0.5,
+  suspiciousThreshold: 0.2
+});
+```
+
+Tuning guidance:
+
+- Keep `threshold: 0.5` for typical API protection.
+- Raise it, for example to `0.7`, if your application accepts code snippets, HTML, SQL text, or other technical content.
+- Lower it only on high-risk endpoints where blocking suspicious input is acceptable.
+- Use `dryRun: true` before changing thresholds in production.
+
+## Detector API
+
+```javascript
+const { Detector } = require('sqlguard-ml');
+
+const detector = new Detector();
+
+console.log(detector.detect('1 UNION/**/SELECT password FROM users--'));
+console.log(detector.detect('{"password"="abc123"}'));
+```
+
+Example result:
+
+```json
+{
+  "label": "sqli",
+  "confidence": 1,
+  "scores": {
+    "sqli": 3,
+    "xss": 0
+  },
+  "matches": [
+    {
+      "id": "union-select",
+      "label": "sqli",
+      "confidence": 0.8
+    }
+  ]
+}
+```
+
+`matches` is useful for debugging and tests. Treat it as diagnostic output, not as a long-term policy API.
+
+## Middleware Options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `threshold` | `0.5` | Blocks when `result.confidence >= threshold`. |
+| `suspiciousThreshold` | `0.2` | Starts ML checks and repeated-probe tracking for non-benign results below `threshold`. |
+| `mlEndpoint` | `null` | Optional HTTP endpoint that receives `{ payload }` and can return `{ label, confidence }` or `{ isMalicious: true }`. |
+| `maxMlCalls` | `10` | Maximum ML calls per request. If exceeded, the middleware fails closed for additional suspicious payloads in that request. |
+| `rateLimitWindowMs` | `300000` | Sliding window for repeated suspicious probes per IP. |
+| `maxSuspiciousRequests` | `3` | Suspicious requests per IP before escalation blocks. |
+| `maxRateLimitCapacity` | `10000` | Maximum IP entries stored in the in-memory limiter. |
+| `dryRun` | `false` | Records detections and calls `next()` instead of blocking. |
+| `logAttacks` | `false` | `true` logs to `console.warn`; a function receives the formatted log message. |
+| `onThreat` | `undefined` | Callback receiving `(event, req)` for detections. |
+| `blockStatus` | `403` | HTTP status code used for blocked requests. |
+| `skip` | `undefined` | Function `(req) => boolean`; return `true` to skip scanning. |
+| `scanHeaders` | `true` | Scan `req.headers`. |
+| `scanCookies` | `true` | Scan `req.cookies` when present. |
+| `scanParams` | `true` | Scan `req.params`. |
+| `scanKeys` | `true` | Scan object keys as well as values. |
+| `maxDepth` | `20` | Maximum object nesting depth before the request is treated as a DoS probe. |
+| `maxFields` | `1000` | Maximum object fields scanned per request before the request is treated as a DoS probe. |
+| `maxPayloadLength` | `50000` | Maximum characters decoded and scanned per string. |
+| `detector` | new `Detector()` | Optional preconfigured detector instance. |
+
+## Blocked Response
+
+```json
+{
+  "error": "Forbidden",
+  "message": "Malicious payload detected by SQLGuard ML",
+  "details": {
+    "label": "sqli"
+  }
+}
+```
+
+Common labels:
+
+- `sqli`
+- `xss`
+- `rate_limit_escalation`
+- `rate_limit_sqli_heuristic`
+- `dos`
+- labels returned by your optional ML endpoint
+
+## CLI
 
 ```bash
-# Detect attacks using the CLI
-sqlguard detect "admin' --"
+sqlguard-ml scan "<script>alert(1)</script>"
+sqlguard-ml scan "1 UNION/**/SELECT password FROM users--"
+sqlguard-ml scan-file payloads.txt --format csv
+```
 
-# Run the Machine Learning API Backend
+JSON is the default output. CSV output includes `payload,label,confidence`.
+
+## Optional ML Bridge
+
+The Node package works without Python. If you want a second opinion for suspicious-but-not-blocked payloads, run your own HTTP model endpoint and pass its URL as `mlEndpoint`.
+
+Development stub:
+
+```bash
+cd python
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+python src/sqlguard_ml/train_stub.py
 uvicorn sqlguard_ml.api:app --port 8000
 ```
 
----
+Then configure:
 
-## Publishing the Packages (For Maintainers)
+```javascript
+app.use(expressMiddleware({
+  threshold: 0.6,
+  suspiciousThreshold: 0.2,
+  mlEndpoint: 'http://127.0.0.1:8000/api/detect'
+}));
+```
 
-Want to publish these to the official registries so that `npm i` and `pip install` work for the public? Here's how:
+The included Python code is a reference pipeline. For production, train and operate your own model with representative data, versioning, latency limits, and monitoring.
 
-**Publish to NPM:**
+## Security Guidance
+
+For SQL injection prevention, use parameterized queries, safe stored procedures where appropriate, allow-list validation for dynamic identifiers, and least-privilege database accounts.
+
+For XSS prevention, use framework escaping, context-aware output encoding, HTML sanitization for rich content, safe DOM sinks, CSP, and Trusted Types where practical.
+
+References:
+
+- OWASP SQL Injection Prevention Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+- OWASP Cross Site Scripting Prevention Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html
+
+## Testing
+
+```bash
+cd npm
+npm test
+```
+
+The Node suite covers the detector, middleware, adversarial bypasses, header/raw body scanning, rate limiting, CLI behavior, package metadata, and benign traffic false-positive checks.
+
+Current result:
+
+```text
+Test Suites: 8 passed, 8 total
+Tests: 44 passed, 44 total
+```
+
+Contributors should add new bypasses or false positives as tests before changing detector rules.
+
+## Repository Layout
+
+```text
+npm/                  Node package, Express middleware, CLI, and Jest tests
+python/               Optional Python reference service
+test_integration/     Local Express integration example
+.github/workflows/    CI configuration
+```
+
+## Publishing
+
+NPM publishing is manual:
+
 ```bash
 cd npm
 npm login
 npm publish
 ```
 
-**Publish to PyPI:**
+Python package publishing, if needed:
+
 ```bash
 cd python
-pip install build twine
 python -m build
 twine upload dist/*
 ```
 
----
-
-
-
-## Contributing
-Contributions, issues, and feature requests are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-
 ## License
-Copyright © 2026. This project is [MIT](LICENSE) licensed.
 
-
-
+MIT. See [LICENSE](LICENSE).
