@@ -23,6 +23,14 @@ app.use(guard.global());
 app.post('/login', guard.route(), (req, res) => {
   res.json({ ok: true });
 });
+
+app.listen(3000);
+```
+
+Test a blocked request:
+
+```bash
+curl "http://localhost:3000/login?id=1%20UNION%20SELECT%20password%20FROM%20users--"
 ```
 
 ## Before and After
@@ -36,7 +44,7 @@ Attacker -> Express route -> Application logic -> Database or HTML rendering
 With SQLGuard ML:
 
 ```text
-Attacker -> SQLGuard ML -> Blocked with 403 or passed to Express route
+Attacker -> SQLGuard ML -> Blocked with 403 if malicious, otherwise passed to the Express route.
 ```
 
 ## Why `global()` and `route()` both exist
@@ -51,6 +59,8 @@ Express does not populate `req.params` until after a route is matched.
 SQLGuard ML scans decoded request data in memory and avoids network calls unless you configure `mlEndpoint`. For typical small API requests, the heuristic scan is designed to add very low overhead. Actual latency depends on payload size, nesting depth, logging, schema checks, and external ML calls.
 
 ## Secure router
+
+Use `secureRouter()` when you want the router to handle both global request scanning and route-level parameter/schema checks automatically.
 
 ```javascript
 const { secureRouter } = require('sqlguard-ml');

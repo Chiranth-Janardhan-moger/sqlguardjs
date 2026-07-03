@@ -29,6 +29,14 @@ app.use(guard.global());
 app.post('/login', guard.route(), (req, res) => {
   res.json({ ok: true });
 });
+
+app.listen(3000);
+```
+
+Test a blocked request:
+
+```bash
+curl "http://localhost:3000/login?id=1%20UNION%20SELECT%20password%20FROM%20users--"
 ```
 
 For route schemas:
@@ -61,7 +69,7 @@ With SQLGuard ML:
 ```text
 Attacker
   -> SQLGuard ML
-  -> Blocked with 403 or passed to Express route
+  -> Blocked with 403 if malicious, otherwise passed to the Express route.
 ```
 
 ## Why `global()` and `route()` both exist
@@ -134,7 +142,7 @@ app.post('/login', guard.route({
 app.listen(3000);
 ```
 
-You can also use `secureRouter()` to apply global and route-level verification automatically:
+You can also use `secureRouter()` when you want the router to handle both global request scanning and route-level parameter/schema checks automatically:
 
 ```javascript
 const express = require('express');
