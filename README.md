@@ -433,24 +433,6 @@ test_integration/     Local Express integration example
 .github/workflows/    CI configuration
 ```
 
-## Publishing
-
-NPM publishing is manual:
-
-```bash
-cd npm
-npm login
-npm publish
-```
-
-Python package publishing, if needed:
-
-```bash
-cd python
-python -m build
-twine upload dist/*
-```
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
