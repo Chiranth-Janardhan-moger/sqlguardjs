@@ -1,4 +1,4 @@
-# SQLGuard-ML: Model Training & Prediction
+# SQLGuardjs: Model Training & Prediction
 
 ## How to run it
 
