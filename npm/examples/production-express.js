@@ -1,9 +1,9 @@
 const express = require('express');
 const helmet = require('helmet');
-const { secureRouter } = require('@chiranthmoger/sqlguard');
+const { secureRouter } = require('sqlguardjs');
 
 // Install example dependencies with:
-// npm install express helmet @chiranthmoger/sqlguard
+// npm install express helmet sqlguardjs
 
 const app = express();
 

@@ -1,10 +1,10 @@
 # SQLGuard
 
-[![npm version](https://img.shields.io/npm/v/%40chiranthmoger%2Fsqlguard.svg)](https://www.npmjs.com/package/@chiranthmoger/sqlguard)
+[![npm version](https://img.shields.io/npm/v/sqlguardjs.svg)](https://www.npmjs.com/package/sqlguardjs)
 [![Tests](https://github.com/Chiranth-Janardhan-moger/sqlguard/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard/actions/workflows/ci.yml)
 [![Node.js >=18](https://img.shields.io/badge/node-%3E%3D18.0.0-339933.svg)](https://nodejs.org/)
-[![License: MIT](https://img.shields.io/npm/l/%40chiranthmoger%2Fsqlguard.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard/blob/main/LICENSE)
-[![npm downloads](https://img.shields.io/npm/dm/%40chiranthmoger%2Fsqlguard.svg)](https://www.npmjs.com/package/@chiranthmoger/sqlguard)
+[![License: MIT](https://img.shields.io/npm/l/sqlguardjs.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguard/blob/main/LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sqlguardjs.svg)](https://www.npmjs.com/package/sqlguardjs)
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
@@ -17,14 +17,14 @@ SQLGuard is a defense-in-depth control. It does not replace parameterized SQL qu
 Install:
 
 ```bash
-npm install @chiranthmoger/sqlguard
+npm install sqlguardjs
 ```
 
 Use:
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('@chiranthmoger/sqlguard');
+const { sqlguard } = require('sqlguardjs');
 
 const app = express();
 const guard = sqlguard();
@@ -113,7 +113,7 @@ Register SQLGuard after body parsers and before protected routes.
 
 ```javascript
 const express = require('express');
-const { sqlguard } = require('@chiranthmoger/sqlguard');
+const { sqlguard } = require('sqlguardjs');
 
 const app = express();
 const guard = sqlguard({
@@ -152,7 +152,7 @@ You can also use `secureRouter()` when you want the router to handle both global
 
 ```javascript
 const express = require('express');
-const { secureRouter } = require('@chiranthmoger/sqlguard');
+const { secureRouter } = require('sqlguardjs');
 
 const app = express();
 const router = secureRouter({
@@ -286,7 +286,7 @@ Tuning guidance:
 ## Detector API
 
 ```javascript
-const { Detector } = require('@chiranthmoger/sqlguard');
+const { Detector } = require('sqlguardjs');
 
 const detector = new Detector();
 
