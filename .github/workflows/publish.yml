@@ -1,0 +1,64 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: npm/package-lock.json
+      - name: Install dependencies
+        run: |
+          cd npm
+          npm ci
+      - name: Run tests
+        run: |
+          cd npm
+          npm test
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: npm/package-lock.json
+      - name: Install dependencies
+        run: |
+          cd npm
+          npm ci
+      - name: Verify package version matches release tag
+        run: |
+          cd npm
+          PACKAGE_VERSION="v$(node -p "require('./package.json').version")"
+          RELEASE_TAG="${{ github.event.release.tag_name }}"
+          if [ "$PACKAGE_VERSION" != "$RELEASE_TAG" ]; then
+            echo "::error::Package version ($PACKAGE_VERSION) does not match release tag ($RELEASE_TAG)"
+            exit 1
+          fi
+      - name: Publish to npm
+        run: |
+          cd npm
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
