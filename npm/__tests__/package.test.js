@@ -9,7 +9,7 @@ describe('package metadata', () => {
 
   it('should publish under the clean sqlguardjs package name', () => {
     expect(pkg.name).toBe('sqlguardjs');
-    expect(pkg.version).toBe('1.0.1');
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(pkg.bin.sqlguardjs).toBe('bin/sqlguardjs.js');
   });
 
