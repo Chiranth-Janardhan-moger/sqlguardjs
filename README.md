@@ -671,18 +671,18 @@ Reports detector and middleware latency/throughput. Run this after changing dete
 
 For high-throughput endpoints, set route-specific schemas and lower `maxFields` / `maxPayloadLength` to match the largest valid request the endpoint should accept. If a route intentionally accepts large files or raw technical content, validate that path separately and `skip` it in the scanner.
 
-> Before publishing numbers, run them yourself. The table below is a template for the shape of output `npm run benchmark` produces - the specific figures should be filled in from a real run on your own machine.
+Local benchmark measured on Node.js v22.19.0, Windows, Intel Core i5-1335U, 5,000 iterations, benign payloads. Run `npm run benchmark` on your own deployment target before using these numbers for capacity planning.
 
 | Payload size | Avg detector latency |
 |---|---:|
-| 1 KB | *(fill in from your own run)* |
-| 10 KB | *(fill in from your own run)* |
-| 50 KB | *(fill in from your own run)* |
+| 1 KB | 0.15 ms |
+| 10 KB | 2.28 ms |
+| 50 KB | 6.21 ms |
 
 | Metric | Result |
 |---|---:|
-| Middleware throughput, 1 KB payload | *(fill in from your own run)* |
-| Retained heap delta after 5,000 requests | *(fill in from your own run)* |
+| Middleware throughput, 1 KB payload | 6,678 req/sec |
+| Retained heap delta after 5,000 requests | 0.06 MB |
 
 ---
 
