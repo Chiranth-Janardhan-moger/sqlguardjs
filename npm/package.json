@@ -1,10 +1,7 @@
 {
-  "name": "@chiranthmoger/sqlguardjs",
-  "publishConfig": {
-    "access": "public"
-  },
+  "name": "sqlguardjs",
   "version": "1.0.3",
-  "description": "Express middleware and CLI scanner for SQL injection, NoSQL injection, and XSS payloads",
+  "description": "Express middleware and CLI scanner for injection and cross-site scripting attempts",
   "main": "src/detector.js",
   "types": "index.d.ts",
   "bin": {
@@ -35,7 +32,8 @@
     "index.d.ts"
   ],
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "benchmark": "node benchmarks/latency.js"
   },
   "devDependencies": {
     "express": "^5.2.1",

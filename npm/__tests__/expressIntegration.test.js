@@ -1,6 +1,6 @@
 const express = require('express');
 const request = require('supertest');
-const { expressMiddleware, secureRouter, sqlguardjs } = require('../src/detector');
+const { createNestMiddleware, expressMiddleware, nestjsMiddleware, secureRouter, sqlguardjs } = require('../src/detector');
 
 function captureRawBody(req, res, next) {
   let body = '';
@@ -386,5 +386,238 @@ describe('Express integration', () => {
       path: 'query.next'
     }));
     expect(learningEvents[0].clusterKey).toMatch(/^xss:/);
+  });
+
+  it('exposes a bounded log endpoint when the app mounts it', async () => {
+    const app = express();
+    const guard = sqlguardjs({
+      mode: 'log',
+      logRequests: true,
+      maxLogs: 1
+    });
+
+    app.use(guard.global());
+    app.get('/admin/security/logs', guard.logsHandler());
+    app.get('/search', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .get('/search?q=<script>alert(1)</script>')
+      .expect(200);
+    await request(app)
+      .get('/search?q=UNION%20SELECT%20password%20FROM%20users')
+      .expect(200);
+
+    await request(app)
+      .get('/admin/security/logs')
+      .expect(200)
+      .expect(res => {
+        expect(res.body).toHaveLength(1);
+        expect(res.body[0]).toEqual(expect.objectContaining({
+          type: 'sqlguardjs.threat',
+          action: 'observe',
+          blocked: false,
+          method: 'GET',
+          url: expect.stringContaining('/search'),
+          path: 'query.q'
+        }));
+      });
+  });
+
+  it('can expose logs from secureRouter when explicitly enabled', async () => {
+    const app = express();
+    const router = secureRouter({
+      mode: 'log',
+      logRequests: true,
+      exposeLogs: true,
+      logsPath: '/security/logs'
+    });
+
+    router.get('/search', (req, res) => res.json({ ok: true }));
+    app.use(router);
+
+    await request(app)
+      .get('/search?q=<script>alert(1)</script>')
+      .expect(200);
+
+    await request(app)
+      .get('/security/logs')
+      .expect(200)
+      .expect(res => {
+        expect(res.body[0]).toEqual(expect.objectContaining({
+          type: 'sqlguardjs.threat',
+          action: 'observe',
+          label: 'xss'
+        }));
+      });
+  });
+
+  it('records repeated suspicious activity escalation in endpoint logs', async () => {
+    const app = express();
+    const guard = sqlguardjs({
+      mode: 'block',
+      threshold: 0.6,
+      maxSuspiciousRequests: 2,
+      logRequests: true
+    });
+
+    app.use(guard.global());
+    app.get('/admin/security/logs', guard.logsHandler());
+    app.get('/redirect', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .get('/redirect?next=javascript:')
+      .expect(200);
+
+    await request(app)
+      .get('/redirect?next=javascript:')
+      .expect(403);
+
+    await request(app)
+      .get('/admin/security/logs')
+      .expect(200)
+      .expect(res => {
+        expect(res.body).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            type: 'sqlguardjs.rate_limit',
+            label: 'rate_limit_escalation',
+            reason: 'repeated_suspicious_probe'
+          }),
+          expect.objectContaining({
+            type: 'sqlguardjs.threat',
+            label: 'rate_limit_escalation'
+          })
+        ]));
+      });
+  });
+
+  it('lets learning mode observe strong detections without blocking initially', async () => {
+    const app = express();
+    const guard = sqlguardjs({
+      learning: true,
+      logRequests: true
+    });
+
+    app.use(guard.global());
+    app.get('/admin/security/logs', guard.logsHandler());
+    app.get('/profile', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .get('/profile?bio=<script>alert(1)</script>')
+      .expect(200);
+
+    await request(app)
+      .get('/admin/security/logs')
+      .expect(200)
+      .expect(res => {
+        expect(res.body[0]).toEqual(expect.objectContaining({
+          action: 'observe',
+          blocked: false,
+          label: 'xss'
+        }));
+      });
+  });
+
+  it('supports strict, balanced, and permissive detection levels', async () => {
+    const strictApp = express();
+    strictApp.use(expressMiddleware({ level: 'strict' }));
+    strictApp.get('/redirect', (req, res) => res.json({ ok: true }));
+
+    await request(strictApp)
+      .get('/redirect?next=javascript:')
+      .expect(403);
+
+    const balancedApp = express();
+    balancedApp.use(expressMiddleware({ level: 'balanced' }));
+    balancedApp.get('/redirect', (req, res) => res.json({ ok: true }));
+
+    await request(balancedApp)
+      .get('/redirect?next=javascript:')
+      .expect(200);
+
+    const middleware = expressMiddleware({
+      level: 'permissive',
+      logRequests: true
+    });
+    const permissiveAppWithLogs = express();
+    permissiveAppWithLogs.use(middleware);
+    permissiveAppWithLogs.get('/admin/security/logs', middleware.logsHandler());
+    permissiveAppWithLogs.get('/search', (req, res) => res.json({ ok: true }));
+
+    await request(permissiveAppWithLogs)
+      .get('/search?q=<script>alert(1)</script>')
+      .expect(200);
+    await request(permissiveAppWithLogs)
+      .get('/admin/security/logs')
+      .expect(200)
+      .expect(res => {
+        expect(res.body[0]).toEqual(expect.objectContaining({
+          action: 'observe',
+          label: 'xss'
+        }));
+      });
+  });
+
+  it('suppresses known false positives by route or parameter', async () => {
+    const app = express();
+
+    app.use(expressMiddleware({
+      allowRoutes: ['/admin/search'],
+      allowParams: ['query.q']
+    }));
+    app.get('/admin/search', (req, res) => res.json({ ok: true }));
+    app.get('/search', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .get('/admin/search?term=<script>alert(1)</script>')
+      .expect(200);
+
+    await request(app)
+      .get('/search?q=<script>alert(1)</script>')
+      .expect(200);
+
+    await request(app)
+      .get('/search?other=<script>alert(1)</script>')
+      .expect(403);
+  });
+
+  it('can lower sensitivity for selected routes', async () => {
+    const app = express();
+
+    app.use(expressMiddleware({
+      level: 'strict',
+      routeLevels: {
+        '/redirect': 'balanced'
+      }
+    }));
+    app.get('/redirect', (req, res) => res.json({ ok: true }));
+    app.get('/strict', (req, res) => res.json({ ok: true }));
+
+    await request(app)
+      .get('/redirect?next=javascript:')
+      .expect(200);
+
+    await request(app)
+      .get('/strict?next=javascript:')
+      .expect(403);
+  });
+
+  it('reuses the Express middleware contract for NestJS functional and class middleware', async () => {
+    const functionalApp = express();
+    functionalApp.use(nestjsMiddleware({ mode: 'log' }));
+    functionalApp.get('/profile', (req, res) => res.json({ ok: true }));
+
+    await request(functionalApp)
+      .get('/profile?bio=<script>alert(1)</script>')
+      .expect(200);
+
+    const NestGuard = createNestMiddleware({ mode: 'log' });
+    const classApp = express();
+    const nestGuard = new NestGuard();
+    classApp.use(nestGuard.use.bind(nestGuard));
+    classApp.get('/profile', (req, res) => res.json({ ok: true }));
+
+    await request(classApp)
+      .get('/profile?bio=<script>alert(1)</script>')
+      .expect(200);
   });
 });

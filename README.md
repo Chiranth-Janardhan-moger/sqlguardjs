@@ -5,6 +5,8 @@
 [![Node.js >=18](https://img.shields.io/badge/node-%3E%3D18.0.0-339933.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/npm/l/sqlguardjs.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguardjs/blob/main/LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/sqlguardjs.svg)](https://www.npmjs.com/package/sqlguardjs)
+[![package size](https://img.shields.io/bundlephobia/minzip/sqlguardjs)](https://bundlephobia.com/package/sqlguardjs)
+[![Security Policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
 
 Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
 
@@ -42,7 +44,7 @@ app.listen(3000);
 Test a blocked request:
 
 ```bash
-curl "http://localhost:3000/login?id=1%20UNION%20SELECT%20password%20FROM%20users--"
+curl "http://localhost:3000/login?id=<security-test-string>"
 ```
 
 For route schemas:
@@ -59,23 +61,47 @@ app.post('/login', guard.route({
 }), loginHandler);
 ```
 
-## Before and After
+## How It Works
 
-Without SQLGuardJS:
+| Without SQLGuardJS | With SQLGuardJS |
+|---|---|
+| Request reaches the Express route directly. | Request is inspected before route logic runs. |
+| Route handler receives raw query, body, params, headers, and cookies. | SQLGuardJS scans query, body, params, headers, cookies, and optional schemas. |
+| Suspicious input can reach application logic, database queries, or HTML rendering. | Malicious input is blocked with `403`; safe input continues to the route. |
+| Security depends entirely on every handler validating perfectly. | Middleware adds a shared defense-in-depth layer across protected routes. |
+| Logging depends on custom application code. | Detections can be logged, reviewed in learning mode, or exposed through an admin log endpoint. |
 
 ```text
-Attacker
-  -> Express route
-  -> Application logic
-  -> Database or HTML rendering
+Client / Bot / Scanner
+        |
+        v
+SQLGuardJS middleware
+        |
+        +-- normalize and decode input
+        +-- run injection and XSS detector
+        +-- check route schema and request limits
+        +-- track repeated suspicious probes
+        |
+        v
+Block with 403 or pass to Express route
 ```
 
-With SQLGuardJS:
-
 ```text
-Attacker
-  -> SQLGuardJS
-  -> Blocked with 403 if malicious, otherwise passed to the Express route.
+Browser / Mobile / Postman / curl / Bot / Scanner
+        |
+        v
+SQLGuardJS
+        |
+        +-- Route schema
+        +-- Detector
+        +-- Rate limiter
+        +-- Learning/log events
+        |
+        v
+Application route
+        |
+        v
+Database / renderer / downstream service
 ```
 
 ## Why `global()` and `route()` both exist
@@ -95,11 +121,26 @@ Default limits such as `maxPayloadLength`, `maxDepth`, and `maxFields` are inclu
 
 For high-throughput bulk import endpoints, set route-specific schemas and lower `maxFields` or `maxPayloadLength` to match the largest valid request your endpoint should accept. If an endpoint intentionally accepts large files or raw technical content, validate that upload path separately and use `skip` for the scanner on that route.
 
+Local benchmark, measured on Node.js v22.19.0, Windows, Intel Core i5-1335U, 5,000 iterations, benign payloads:
+
+| Payload size | Avg detector latency |
+| --- | ---: |
+| 1 KB | 0.14 ms |
+| 10 KB | 1.23 ms |
+| 50 KB | 6.32 ms |
+
+| Metric | Result |
+| --- | ---: |
+| Middleware throughput, 1 KB payload | 6,540 req/sec |
+| Retained heap delta after 5,000 middleware requests | 0.06 MB |
+
+Run `npm run benchmark` on your own target machine before using these numbers for capacity planning.
+
 ## Features
 
-- Detects SQL injection patterns including boolean tautologies, `UNION SELECT`, stacked statements, destructive DDL, time-delay probes, and metadata enumeration.
+- Detects SQL injection patterns including boolean tautologies, union-query probes, stacked statements, destructive DDL, time-delay probes, and metadata enumeration.
 - Uses structural SQL-fragment analysis for boolean predicates, stacked statements, and metadata enumeration instead of depending only on exact regular-expression payload strings.
-- Handles SQL comment evasion, including `UNION/**/SELECT` and `UN/**/ION SEL/**/ECT`.
+- Handles SQL comment evasion and keyword splitting.
 - Detects NoSQL operator probes such as `$where`, `$ne`, `$gt`, `$regex`, `$or`, and `$and`.
 - Detects XSS payloads including script tags, event-handler attributes, JavaScript execution URLs, dangerous HTML containers, `srcdoc`, and `data:text/html`.
 - Tokenizes JavaScript pseudo-protocol bodies to catch constructor-chain and global-object execution routes.
@@ -110,6 +151,20 @@ For high-throughput bulk import endpoints, set route-specific schemas and lower 
 - Includes TypeScript definitions and real Express integration tests.
 
 Node.js 18 or newer is required.
+
+## Comparison
+
+| Capability | SQLGuardJS | Helmet | express-validator |
+| --- | --- | --- | --- |
+| SQL injection request detection | Yes | No | No |
+| XSS request detection | Yes | No | Partial, with custom validators |
+| NoSQL operator detection | Yes | No | No |
+| Schema-aware route checks | Yes | No | Yes |
+| Learning/log-only rollout | Yes | No | No |
+| Runtime Express middleware | Yes | Yes | Yes |
+| Security headers | No | Yes | No |
+
+Use Helmet for headers, express-validator for business input validation, and SQLGuardJS as a request-scanning defense-in-depth layer. They solve different problems.
 
 ## Express Usage
 
@@ -202,6 +257,36 @@ app.use('/api', router);
 ```
 
 `secureRouter()` auto-wraps direct HTTP method registrations such as `get`, `post`, `put`, and `all`. For path-scoped `router.use()` or chained `router.route()` declarations, pass `guard.route()` explicitly.
+
+## Real-World Integration Patterns
+
+SQLGuardJS is middleware first, so the safest pattern is to put it before sensitive routes and keep normal framework validation in place.
+
+| Use case | Pattern |
+| --- | --- |
+| Login API | `guard.global()` before routes plus `guard.route({ schema })` on `/login`. |
+| GraphQL | Put `guard.global()` before the GraphQL HTTP handler; use `allowParams` for fields that intentionally carry query text. |
+| Prisma / Drizzle / Sequelize | Keep parameterized ORM calls; add `assertSafeSqlQuery()` only around dynamic raw SQL sinks. |
+| Mongoose | Use request scanning for inbound probes and keep schema validation/operator allowlists in Mongoose. |
+| NestJS | Use `nestjsMiddleware()` or `createNestMiddleware()` with the same options as Express. |
+| Fastify | Use `Detector` in a `preHandler` until a first-class Fastify adapter exists. |
+
+Minimal GraphQL-style placement:
+
+```javascript
+app.use(express.json());
+app.use(guard.global({ scanParams: false }));
+app.use('/graphql', graphqlHttpHandler);
+```
+
+Raw SQL sink guard for ORM escape hatches:
+
+```javascript
+const { assertSafeSqlQuery } = require('sqlguardjs');
+
+assertSafeSqlQuery(dynamicSql);
+await db.execute(dynamicSql, params);
+```
 
 ## Production Rollout
 
@@ -327,7 +412,7 @@ const { evaluatePayloads } = require('sqlguardjs');
 
 const report = evaluatePayloads([
   { payload: 'hello world', label: 'benign' },
-  { payload: "admin' OR 2>1", label: 'sqli' }
+  { payload: '<security-test-string>', label: 'sqli' }
 ]);
 
 console.log(report.summary.falsePositiveRate);
@@ -366,8 +451,8 @@ const { Detector } = require('sqlguardjs');
 
 const detector = new Detector();
 
-console.log(detector.detect('1 UNION/**/SELECT password FROM users--'));
-console.log(detector.detect('{"password"="abc123"}'));
+console.log(detector.detect('<security-test-string>'));
+console.log(detector.detect('normal search text'));
 ```
 
 Example result:
@@ -450,8 +535,7 @@ Common labels:
 ## CLI
 
 ```bash
-sqlguardjs scan "<script>alert(1)</script>"
-sqlguardjs scan "1 UNION/**/SELECT password FROM users--"
+sqlguardjs scan "<security-test-string>"
 sqlguardjs scan-file payloads.txt --format csv
 ```
 
@@ -464,10 +548,57 @@ For SQL injection prevention, use parameterized queries, safe stored procedures 
 
 For XSS prevention, use framework escaping, context-aware output encoding, HTML sanitization for rich content, safe DOM sinks, CSP, and Trusted Types where practical.
 
+### OWASP Mapping
+
+| OWASP area | SQLGuardJS coverage |
+| --- | --- |
+| A03 Injection | SQL injection request detection, NoSQL operator detection, and final SQL query guard. |
+| A05 Security Misconfiguration | Schema-aware route checks and request-size safety limits reduce accidental exposure. |
+| A07 Identification and Authentication Failures | Login and account routes can run stricter route-level scanning and repeated-probe escalation. |
+
+SQLGuardJS helps with these controls, but it is not a complete OWASP compliance solution. Keep the underlying database, ORM, session, auth, and rendering controls in place.
+
+### Security Model
+
+SQLGuardJS assumes the attacker controls request inputs and may use encoding, nesting, repeated probes, and malformed objects. It does not assume access to your database, templates, sessions, or authorization rules.
+
+Known boundaries:
+
+- It scans data Express or your parser exposes on the request object.
+- It cannot prove a query is safe if your app later constructs unsafe SQL outside the request path.
+- It can produce false positives on endpoints that intentionally accept code, markup, or SQL-like text.
+- It is an in-process control; persistent review, SIEM correlation, and long-term retention belong in your own logging stack.
+
+See [SECURITY.md](SECURITY.md) for supported versions and vulnerability reporting.
+
 References:
 
 - OWASP SQL Injection Prevention Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
 - OWASP Cross Site Scripting Prevention Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html
+
+## GitHub Action Scan
+
+Use the CLI in CI when you keep request fixtures or suspicious strings in a private test file:
+
+```yaml
+name: SQLGuardJS Scan
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  sqlguardjs-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g sqlguardjs
+      - run: sqlguardjs scan-file requests.txt
+```
 
 ## Testing
 
@@ -482,8 +613,8 @@ It also includes real Express integration tests with `supertest` for query, body
 Current result:
 
 ```text
-Test Suites: 10 passed, 10 total
-Tests: 156 passed, 156 total
+Test Suites: 11 passed, 11 total
+Tests: 165 passed, 165 total
 ```
 
 Contributors should add new bypasses or false positives as tests before changing detector rules.

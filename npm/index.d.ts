@@ -7,6 +7,10 @@ export type ThreatLabel =
   | 'dos'
   | string;
 
+export type DetectionLevel = 'strict' | 'balanced' | 'permissive';
+export type EnforcementMode = 'block' | 'log' | 'observe' | 'monitor' | 'dry-run' | 'dryrun';
+export type AllowPattern = string | RegExp | ((value: string, req?: any) => boolean);
+
 export interface DetectionMatch {
   id: string;
   label: string;
@@ -78,6 +82,19 @@ export interface SqlGuardJSCallbackErrorContext {
   eventPath: string | null;
 }
 
+export type SqlGuardJSStoredLogEvent = SqlGuardJSLogEvent | SqlGuardJSLearningEvent;
+
+export interface SqlGuardJSLogStore {
+  maxLogs?: number;
+  add(event: SqlGuardJSStoredLogEvent): void;
+  list(): SqlGuardJSStoredLogEvent[];
+  clear?(): void;
+}
+
+export interface LogsHandlerOptions {
+  limit?: number;
+}
+
 export interface SchemaRule {
   allowed?: string[];
   fields?: string[];
@@ -100,7 +117,25 @@ export interface LearningOptions {
   onEvent?: (event: SqlGuardJSLearningEvent, req: any) => void | Promise<void>;
 }
 
+export interface RouteDetectionOptions {
+  level?: DetectionLevel;
+  detectionLevel?: DetectionLevel;
+  threshold?: number;
+  suspiciousThreshold?: number;
+  maxSuspiciousRequests?: number;
+}
+
+export interface SqlGuardJSAllowlist {
+  routes?: AllowPattern[];
+  params?: AllowPattern[] | Record<string, AllowPattern[]>;
+  parameters?: AllowPattern[] | Record<string, AllowPattern[]>;
+  routeLevels?: Record<string, DetectionLevel | RouteDetectionOptions>;
+}
+
 export interface ExpressMiddlewareOptions {
+  level?: DetectionLevel;
+  detectionLevel?: DetectionLevel;
+  mode?: EnforcementMode;
   threshold?: number;
   suspiciousThreshold?: number;
   rateLimitWindowMs?: number;
@@ -109,6 +144,12 @@ export interface ExpressMiddlewareOptions {
   maxRateLimitEventsPerKey?: number;
   rateLimitKey?: (req: any) => string | null | undefined | Promise<string | null | undefined>;
   dryRun?: boolean;
+  logRequests?: boolean;
+  logs?: boolean;
+  maxLogs?: number;
+  exposeLogs?: boolean;
+  logsPath?: string;
+  logStore?: SqlGuardJSLogStore;
   logAttacks?: boolean | ((messageOrEvent: string | SqlGuardJSLogEvent, event?: SqlGuardJSLogEvent) => void | Promise<void>);
   logFormat?: 'text' | 'json';
   jsonLogs?: boolean;
@@ -125,6 +166,15 @@ export interface ExpressMiddlewareOptions {
   scanParams?: boolean;
   scanKeys?: boolean;
   scanRawBody?: boolean;
+  allowRoutes?: AllowPattern[];
+  allowedRoutes?: AllowPattern[];
+  allowParams?: AllowPattern[] | Record<string, AllowPattern[]>;
+  allowedParams?: AllowPattern[] | Record<string, AllowPattern[]>;
+  allowParameters?: AllowPattern[] | Record<string, AllowPattern[]>;
+  allowlist?: SqlGuardJSAllowlist;
+  routeLevels?: Record<string, DetectionLevel | RouteDetectionOptions>;
+  routeDetectionLevels?: Record<string, DetectionLevel | RouteDetectionOptions>;
+  routeThresholds?: Record<string, DetectionLevel | RouteDetectionOptions>;
   maxDepth?: number;
   maxFields?: number;
   maxPayloadLength?: number;
@@ -155,13 +205,21 @@ export class Detector {
 
 export interface SqlGuardJSInstance {
   detector: Detector;
+  logStore: SqlGuardJSLogStore;
   global(overrides?: ExpressMiddlewareOptions): RequestHandler;
   route(overrides?: ExpressMiddlewareOptions): RequestHandler;
   verify(overrides?: ExpressMiddlewareOptions): RequestHandler;
   middleware(overrides?: ExpressMiddlewareOptions): RequestHandler;
+  nestjs(overrides?: ExpressMiddlewareOptions): RequestHandler;
+  logs(): SqlGuardJSStoredLogEvent[];
+  clearLogs(): void;
+  logsHandler(options?: LogsHandlerOptions): RequestHandler;
+  mountLogs(app: any, path?: string, options?: LogsHandlerOptions): any;
 }
 
 export interface SqlQueryGuardOptions {
+  level?: DetectionLevel;
+  detectionLevel?: DetectionLevel;
   threshold?: number;
   maxPayloadLength?: number;
   maxDecodeIterations?: number;
@@ -208,6 +266,10 @@ export class SqlGuardJSQueryError extends Error {
 export function scanSqlQuery(query: string, options?: SqlQueryGuardOptions): DetectionResult;
 export function assertSafeSqlQuery(query: string, options?: SqlQueryGuardOptions): DetectionResult;
 export function evaluatePayloads(samples: Array<string | PayloadEvaluationSample>, options?: SqlQueryGuardOptions): PayloadEvaluationReport;
+export function createMemoryLogStore(maxLogs?: number): SqlGuardJSLogStore;
+export function createLogsHandler(logStore: SqlGuardJSLogStore, options?: LogsHandlerOptions): RequestHandler;
 export function expressMiddleware(options?: ExpressMiddlewareOptions): RequestHandler;
+export function nestjsMiddleware(options?: ExpressMiddlewareOptions): RequestHandler;
+export function createNestMiddleware(options?: ExpressMiddlewareOptions): any;
 export function sqlguardjs(options?: ExpressMiddlewareOptions): SqlGuardJSInstance;
 export function secureRouter(options?: SecureRouterOptions): any;

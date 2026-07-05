@@ -3,10 +3,28 @@ const crypto = require('crypto');
 
 const DEFAULT_THRESHOLD = 0.5;
 const DEFAULT_SUSPICIOUS_THRESHOLD = 0.2;
+const DEFAULT_MAX_LOGS = 500;
 const DEFAULT_MAX_PAYLOAD_LENGTH = 50000;
 const DEFAULT_MAX_DECODE_ITERATIONS = 8;
 const DEFAULT_MAX_DEPTH = 20;
 const DEFAULT_MAX_FIELDS = 1000;
+const DETECTION_LEVELS = Object.freeze({
+  strict: Object.freeze({
+    threshold: 0.25,
+    suspiciousThreshold: 0.1,
+    maxSuspiciousRequests: 2
+  }),
+  balanced: Object.freeze({
+    threshold: DEFAULT_THRESHOLD,
+    suspiciousThreshold: DEFAULT_SUSPICIOUS_THRESHOLD,
+    maxSuspiciousRequests: 3
+  }),
+  permissive: Object.freeze({
+    threshold: 0.85,
+    suspiciousThreshold: 0.5,
+    maxSuspiciousRequests: 5
+  })
+});
 const SQL_IDENTIFIER = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*)';
 const SQL_WORD_BOOLEAN_OPERATOR = '(?:OR|AND|XOR)';
 const SQL_SYMBOL_BOOLEAN_OPERATOR = '(?:\\|\\||&&)';
@@ -606,6 +624,168 @@ function createLearningEvent(req, payload, result, path, options = {}) {
   };
 }
 
+function normalizeDetectionLevel(level = 'balanced') {
+  const normalized = String(level || 'balanced').toLowerCase();
+  if (!DETECTION_LEVELS[normalized]) {
+    throw new Error(`Unknown SQLGuardJS detection level: ${level}`);
+  }
+  return normalized;
+}
+
+function resolveDetectionSettings(options = {}) {
+  const level = normalizeDetectionLevel(options.level ?? options.detectionLevel ?? 'balanced');
+  const defaults = DETECTION_LEVELS[level];
+  return {
+    level,
+    threshold: options.threshold ?? defaults.threshold,
+    suspiciousThreshold: options.suspiciousThreshold ?? defaults.suspiciousThreshold,
+    maxSuspiciousRequests: options.maxSuspiciousRequests ?? defaults.maxSuspiciousRequests
+  };
+}
+
+function normalizeMode(mode) {
+  if (mode === undefined || mode === null) return null;
+  const normalized = String(mode).toLowerCase();
+  if (['block', 'blocking', 'enforce', 'enforced'].includes(normalized)) return 'block';
+  if (['log', 'observe', 'monitor', 'dry-run', 'dryrun'].includes(normalized)) return 'log';
+  throw new Error(`Unknown SQLGuardJS mode: ${mode}`);
+}
+
+function toList(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function mergeLists(...values) {
+  return values.flatMap(toList);
+}
+
+function isPlainRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof RegExp);
+}
+
+function matchesPattern(pattern, value, req) {
+  const text = String(value || '');
+  if (typeof pattern === 'function') return pattern(text, req) === true;
+  if (pattern instanceof RegExp) {
+    pattern.lastIndex = 0;
+    return pattern.test(text);
+  }
+  const expected = String(pattern);
+  if (expected.endsWith('*')) return text.startsWith(expected.slice(0, -1));
+  return text === expected;
+}
+
+function patternMatchesAny(patterns, value, req) {
+  return patterns.some(pattern => matchesPattern(pattern, value, req));
+}
+
+function routeAllowPatterns(options = {}) {
+  const allowlist = options.allowlist || {};
+  return mergeLists(options.allowRoutes, options.allowedRoutes, allowlist.routes);
+}
+
+function paramAllowPatterns(req, options = {}) {
+  const allowlist = options.allowlist || {};
+  const values = mergeLists(
+    options.allowParams,
+    options.allowedParams,
+    options.allowParameters,
+    allowlist.params,
+    allowlist.parameters
+  );
+  const patterns = [];
+
+  for (const value of values) {
+    if (isPlainRecord(value)) {
+      for (const [routePattern, routePatterns] of Object.entries(value)) {
+        if (requestMatchesPattern(req, routePattern)) patterns.push(...toList(routePatterns));
+      }
+    } else {
+      patterns.push(value);
+    }
+  }
+
+  return patterns;
+}
+
+function requestMatchesPattern(req, pattern) {
+  return schemaCandidates(req).some(candidate => matchesPattern(pattern, candidate, req));
+}
+
+function isRouteAllowed(req, options = {}) {
+  return routeAllowPatterns(options).some(pattern => requestMatchesPattern(req, pattern));
+}
+
+function isParamAllowed(req, path, options = {}) {
+  return patternMatchesAny(paramAllowPatterns(req, options), path, req);
+}
+
+function routeDetectionMaps(options = {}) {
+  const allowlist = options.allowlist || {};
+  return [
+    options.routeLevels,
+    options.routeDetectionLevels,
+    options.routeThresholds,
+    allowlist.routeLevels
+  ].filter(isPlainRecord);
+}
+
+function resolveRouteDetectionOverride(req, options = {}) {
+  for (const map of routeDetectionMaps(options)) {
+    for (const [pattern, override] of Object.entries(map)) {
+      if (requestMatchesPattern(req, pattern)) return override;
+    }
+  }
+  return null;
+}
+
+function resolveRequestDetectionSettings(req, options = {}, baseSettings = resolveDetectionSettings(options)) {
+  const override = resolveRouteDetectionOverride(req, options);
+  if (!override) return baseSettings;
+  if (typeof override === 'string') return resolveDetectionSettings({ level: override });
+  return resolveDetectionSettings(override);
+}
+
+function normalizeMaxLogs(maxLogs) {
+  const numeric = Number(maxLogs ?? DEFAULT_MAX_LOGS);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : DEFAULT_MAX_LOGS;
+}
+
+function createMemoryLogStore(maxLogs = DEFAULT_MAX_LOGS) {
+  const limit = normalizeMaxLogs(maxLogs);
+  const entries = [];
+  return {
+    maxLogs: limit,
+    add(event) {
+      entries.push({ ...event });
+      if (entries.length > limit) entries.splice(0, entries.length - limit);
+    },
+    list() {
+      return entries.slice();
+    },
+    clear() {
+      entries.length = 0;
+    }
+  };
+}
+
+function parsePositiveInteger(value, fallback = null) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function createLogsHandler(logStore, options = {}) {
+  return (req, res) => {
+    const allLogs = logStore && typeof logStore.list === 'function' ? logStore.list() : [];
+    const queryLimit = readRequestProperty(readRequestProperty(req, 'query', {}), 'limit', null);
+    const limit = parsePositiveInteger(queryLimit, parsePositiveInteger(options.limit, null));
+    const logs = limit ? allLogs.slice(-limit) : allLogs;
+    return res.status(200).json(logs);
+  };
+}
+
 function normalizeSchemaRule(rule) {
   if (!rule) return null;
   if (Array.isArray(rule)) return { allowed: rule, required: [], allowUnknown: false };
@@ -936,7 +1116,7 @@ class Detector {
     }
     if (sqlCommentMode === 'preserve') return decoded;
     // Preserve SQL block comments as separators so UNION/**/SELECT stays tokenized.
-    // Detection also checks a removal variant to catch mid-keyword splits such as UN/**/ION.
+    // Detection also checks a removal variant to catch mid-keyword comment splits.
     decoded = decoded.replace(/\/\*!\d{0,6}\s*([\s\S]*?)\*\//g, (_, inner) => {
       const executableSql = inner.trim();
       if (sqlCommentMode === 'remove') return executableSql;
@@ -1000,9 +1180,15 @@ function expressMiddleware(options = {}) {
     maxPayloadLength: options.maxPayloadLength,
     maxDecodeIterations: options.maxDecodeIterations
   });
-  const threshold = options.threshold ?? DEFAULT_THRESHOLD;
-  const suspiciousThreshold = options.suspiciousThreshold ?? DEFAULT_SUSPICIOUS_THRESHOLD;
-  const maxSuspiciousRequests = options.maxSuspiciousRequests ?? 3;
+  const detectionSettings = resolveDetectionSettings(options);
+  const learning = options.learning === true ? { enabled: true } : (options.learning || {});
+  const mode = normalizeMode(options.mode);
+  const dryRun = typeof options.dryRun === 'boolean'
+    ? options.dryRun
+    : (mode === 'log'
+      ? true
+      : (mode === 'block' ? false : (learning.enabled === true || options.learning === true || detectionSettings.level === 'permissive')));
+  const maxSuspiciousRequests = detectionSettings.maxSuspiciousRequests;
   const maxRateLimitEventsPerKey = Math.max(options.maxRateLimitEventsPerKey ?? 1000, maxSuspiciousRequests);
   const rateLimiter = new IPRateLimiter(
     options.rateLimitWindowMs ?? 300000,
@@ -1012,7 +1198,6 @@ function expressMiddleware(options = {}) {
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
   const maxFields = options.maxFields ?? DEFAULT_MAX_FIELDS;
   const blockStatus = options.blockStatus ?? 403;
-  const dryRun = options.dryRun === true;
   const scanQuery = options.scanQuery !== false;
   const scanBody = options.scanBody !== false;
   const scanHeaders = options.scanHeaders !== false;
@@ -1022,7 +1207,6 @@ function expressMiddleware(options = {}) {
   const scanRawBody = options.scanRawBody !== false;
   const skip = typeof options.skip === 'function' ? options.skip : null;
   const onThreat = typeof options.onThreat === 'function' ? options.onThreat : null;
-  const learning = options.learning === true ? { enabled: true } : (options.learning || {});
   const onLearningEvent = typeof options.onLearningEvent === 'function'
     ? options.onLearningEvent
     : (typeof learning.onEvent === 'function' ? learning.onEvent : null);
@@ -1034,6 +1218,17 @@ function expressMiddleware(options = {}) {
   const requestIdGetter = typeof options.getRequestId === 'function' ? options.getRequestId : defaultRawRequestId;
   const rateLimitKeyGetter = typeof options.rateLimitKey === 'function' ? options.rateLimitKey : getIp;
   const onCallbackError = typeof options.onCallbackError === 'function' ? options.onCallbackError : null;
+  const hasProvidedLogStore = Boolean(options.logStore);
+  const logStore = options.logStore || createMemoryLogStore(options.maxLogs);
+  const storeLogs = Boolean(
+    options.logRequests ||
+    options.logs ||
+    options.exposeLogs ||
+    options.storeLogs ||
+    dryRun ||
+    (hasProvidedLogStore && !options._internalLogStore) ||
+    learningEnabled
+  );
 
   const reportCallbackError = (error, context = {}) => {
     if (!onCallbackError) return;
@@ -1088,8 +1283,8 @@ function expressMiddleware(options = {}) {
   };
 
   const writeLog = (event) => {
-    if (!logger) return;
-    safeCall('logAttacks', logger, [formatEvent(event, logFormat), event], { event });
+    if (storeLogs && logStore && typeof logStore.add === 'function') logStore.add(event);
+    if (logger) safeCall('logAttacks', logger, [formatEvent(event, logFormat), event], { event });
   };
 
   const emitLearning = (req, payload, result, path) => {
@@ -1097,10 +1292,11 @@ function expressMiddleware(options = {}) {
     const event = createLearningEvent(req, payload, result, path, eventOptions);
     req.sqlguardjsLearning = req.sqlguardjsLearning || [];
     req.sqlguardjsLearning.push(event);
+    if (storeLogs && logStore && typeof logStore.add === 'function') logStore.add(event);
     safeCall('onLearningEvent', onLearningEvent, [event, req], { event });
   };
 
-  return async (req, res, next) => {
+  const middleware = async (req, res, next) => {
     if (skip) {
       try {
         const skipResult = skip(req);
@@ -1111,8 +1307,11 @@ function expressMiddleware(options = {}) {
       }
     }
 
+    if (isRouteAllowed(req, options)) return next();
+
     const ip = getIp(req);
     const rateLimitKey = await safeRateLimitKey(req, ip);
+    const requestDetectionSettings = resolveRequestDetectionSettings(req, options, detectionSettings);
     const scannedSources = req.sqlguardjsScannedSources instanceof Set
       ? req.sqlguardjsScannedSources
       : new Set();
@@ -1132,18 +1331,19 @@ function expressMiddleware(options = {}) {
 
     const scanString = async (str, path) => {
       if (typeof str !== 'string' || str.length === 0) return false;
+      if (isParamAllowed(req, path, options)) return false;
       const result = detector.detect(str);
       let finalLabel = result.label;
       let finalConfidence = result.confidence;
-      let isMalicious = result.label !== 'benign' && result.confidence >= threshold;
+      let isMalicious = result.label !== 'benign' && result.confidence >= requestDetectionSettings.threshold;
 
-      if (!isMalicious && result.label !== 'benign' && result.confidence >= suspiciousThreshold) {
+      if (!isMalicious && result.label !== 'benign' && result.confidence >= requestDetectionSettings.suspiciousThreshold) {
         emitLearning(req, str, result, path);
         const suspiciousCount = rateLimiter.recordSuspicious(rateLimitKey);
-        if (suspiciousCount >= maxSuspiciousRequests) {
+        if (suspiciousCount >= requestDetectionSettings.maxSuspiciousRequests) {
           isMalicious = true;
           finalLabel = "rate_limit_escalation";
-          finalConfidence = threshold;
+          finalConfidence = requestDetectionSettings.threshold;
           writeLog({
             type: 'sqlguardjs.rate_limit',
             timestamp: new Date().toISOString(),
@@ -1373,6 +1573,10 @@ function expressMiddleware(options = {}) {
     }
     next();
   };
+
+  middleware.logStore = logStore;
+  middleware.logsHandler = (handlerOptions = {}) => createLogsHandler(logStore, handlerOptions);
+  return middleware;
 }
 
 function mergeOptions(base, override) {
@@ -1400,7 +1604,7 @@ function scanSqlQuery(query, options = {}) {
 
 function assertSafeSqlQuery(query, options = {}) {
   const result = scanSqlQuery(query, options);
-  const threshold = options.threshold ?? DEFAULT_THRESHOLD;
+  const { threshold } = resolveDetectionSettings(options);
   if (result.label === 'sqli' && result.confidence >= threshold) {
     throw new SqlGuardJSQueryError(result);
   }
@@ -1430,7 +1634,7 @@ function evaluatePayloads(samples, options = {}) {
     maxPayloadLength: options.maxPayloadLength,
     maxDecodeIterations: options.maxDecodeIterations
   });
-  const threshold = options.threshold ?? DEFAULT_THRESHOLD;
+  const { threshold } = resolveDetectionSettings(options);
   const results = [];
   const summary = {
     total: samples.length,
@@ -1475,8 +1679,11 @@ function evaluatePayloads(samples, options = {}) {
 }
 
 function sqlguardjs(options = {}) {
+  const logStore = options.logStore || createMemoryLogStore(options.maxLogs);
   const baseOptions = {
     ...options,
+    logStore,
+    _internalLogStore: !options.logStore,
     detector: options.detector || new Detector({
       maxPayloadLength: options.maxPayloadLength,
       maxDecodeIterations: options.maxDecodeIterations
@@ -1499,7 +1706,40 @@ function sqlguardjs(options = {}) {
     middleware(overrides = {}) {
       return expressMiddleware(mergeOptions(baseOptions, overrides));
     },
+    nestjs(overrides = {}) {
+      return nestjsMiddleware(mergeOptions(baseOptions, overrides));
+    },
+    logs() {
+      return logStore.list();
+    },
+    clearLogs() {
+      logStore.clear();
+    },
+    logsHandler(handlerOptions = {}) {
+      return createLogsHandler(logStore, handlerOptions);
+    },
+    mountLogs(app, path = baseOptions.logsPath || '/admin/sqlguard/logs', handlerOptions = {}) {
+      if (!app || typeof app.get !== 'function') {
+        throw new TypeError('mountLogs(app) requires an Express-compatible app with app.get().');
+      }
+      app.get(path, createLogsHandler(logStore, handlerOptions));
+      return app;
+    },
+    logStore,
     detector: baseOptions.detector
+  };
+}
+
+function nestjsMiddleware(options = {}) {
+  return expressMiddleware(options);
+}
+
+function createNestMiddleware(options = {}) {
+  const middleware = nestjsMiddleware(options);
+  return class SqlGuardJSNestMiddleware {
+    use(req, res, next) {
+      return middleware(req, res, next);
+    }
   };
 }
 
@@ -1518,6 +1758,9 @@ function secureRouter(options = {}) {
   const router = express.Router(options.routerOptions || {});
   const guard = sqlguardjs(options);
   router.use(guard.global({ ...(options.globalOptions || {}), scanParams: false }));
+  if (options.exposeLogs) {
+    router.get(options.logsPath || '/admin/sqlguard/logs', guard.logsHandler());
+  }
   const routeGuard = (routeOptions = {}) => guard.route({
     ...routeOptions,
     schema: routeOptions.schema,
@@ -1549,7 +1792,21 @@ function secureRouter(options = {}) {
     };
   }
 
+  router.sqlguardjs = guard;
   return router;
 }
 
-module.exports = { Detector, SqlGuardJSQueryError, assertSafeSqlQuery, evaluatePayloads, expressMiddleware, scanSqlQuery, sqlguardjs, secureRouter };
+module.exports = {
+  Detector,
+  SqlGuardJSQueryError,
+  assertSafeSqlQuery,
+  createLogsHandler,
+  createMemoryLogStore,
+  createNestMiddleware,
+  evaluatePayloads,
+  expressMiddleware,
+  nestjsMiddleware,
+  scanSqlQuery,
+  sqlguardjs,
+  secureRouter
+};

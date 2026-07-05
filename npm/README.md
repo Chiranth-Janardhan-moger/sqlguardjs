@@ -6,9 +6,9 @@
 [![License: MIT](https://img.shields.io/npm/l/sqlguardjs.svg)](https://github.com/Chiranth-Janardhan-moger/sqlguardjs/blob/main/LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/sqlguardjs.svg)](https://www.npmjs.com/package/sqlguardjs)
 
-Protect your Express app from SQL Injection, XSS, and NoSQL Injection in under a minute.
+Protect your Express app from injection and cross-site scripting attempts in under a minute.
 
-SQLGuardJS is an Express request verification layer, middleware, and CLI scanner for common SQL injection, NoSQL injection, and XSS payloads. It runs in-process, combines normalization with structural token analysis, and does not call a database or external service.
+SQLGuardJS is an Express request verification layer, middleware, and CLI scanner for common injection and cross-site scripting attempts. It runs in-process, combines normalization with structural token analysis, and does not call a database or external service.
 
 ## 30-Second Quick Start
 
@@ -33,10 +33,10 @@ app.post('/login', guard.route(), (req, res) => {
 app.listen(3000);
 ```
 
-Test a blocked request:
+Test a blocked request with your own local security-test string:
 
 ```bash
-curl "http://localhost:3000/login?id=1%20UNION%20SELECT%20password%20FROM%20users--"
+curl "http://localhost:3000/login?id=<security-test-string>"
 ```
 
 ## Before and After
@@ -68,7 +68,7 @@ For bulk endpoints, lower `maxFields` and `maxPayloadLength` to the largest vali
 
 SQLGuardJS scans Express-visible data, including plain objects, arrays, buffers, `URLSearchParams`, `Map`, and `Set` containers. Register body parsers before the guard, and expose custom webhook or multipart bytes as `req.rawBody` if your route parses the raw stream later. Unparsed request streams are not visible to any middleware that only reads `req.body`.
 
-The detector uses weighted signatures plus structural SQL-fragment and JavaScript pseudo-protocol analysis, so boolean predicates, stacked statements, metadata enumeration, and constructor-chain `javascript:` payloads are not tied to one exact payload spelling.
+The detector uses weighted signatures plus structural SQL-fragment and browser pseudo-protocol analysis, so boolean predicates, stacked statements, metadata enumeration, and constructor-chain browser vectors are not tied to one exact spelling.
 
 ## Secure Router
 
@@ -123,6 +123,55 @@ Failures thrown by `logAttacks`, `onThreat`, and `onLearningEvent` are isolated 
 
 In `dryRun` mode, SQLGuardJS scans the full request instead of stopping at the first detection. The first detection is stored on `req.sqlguardjs`; all detections are stored on `req.sqlguardjsDetections`.
 
+Repeated suspicious activity is handled by the existing rate-limit escalation settings. Payloads above `suspiciousThreshold` but below `threshold` are allowed at first; after `maxSuspiciousRequests` for the same `rateLimitKey` inside `rateLimitWindowMs`, SQLGuardJS emits `rate_limit_escalation` with reason `repeated_suspicious_probe`. This is not a persistent reputation score or blocklist.
+
+### Log Endpoint
+
+SQLGuardJS can keep a bounded in-memory event list and expose it through an endpoint you mount inside your own admin area.
+
+```javascript
+const guard = sqlguardjs({
+  mode: 'log',
+  logRequests: true,
+  maxLogs: 500
+});
+
+app.use(guard.global());
+app.get('/admin/sqlguard/logs', requireAdmin, guard.logsHandler());
+```
+
+The endpoint returns sanitized detection and learning events as JSON. Payload previews are truncated and sensitive fields such as passwords and tokens are redacted. Mount this route only behind your own authentication.
+
+Use `?limit=50` to return only the newest events. You can also mount the default path with:
+
+```javascript
+guard.mountLogs(app);
+```
+
+`logsPath` is only used by auto-mount helpers. Setting it by itself does not create a route; use `guard.logsHandler()`, `guard.mountLogs(app)`, or `secureRouter({ exposeLogs: true })`.
+
+With `guard.mountLogs(app)`, `logsPath` is mounted directly on that app:
+
+```javascript
+const guard = sqlguardjs({ logsPath: '/security/logs' });
+guard.mountLogs(app);
+```
+
+This mounts `GET /security/logs` directly on `app`.
+
+With `secureRouter()`, `logsPath` is mounted on that router, so any `app.use()` prefix becomes part of the final URL:
+
+```javascript
+const router = secureRouter({
+  exposeLogs: true,
+  logsPath: '/security/logs'
+});
+
+app.use('/api', router);
+```
+
+This mounts `GET /api/security/logs`.
+
 ## Final SQL Query Guard
 
 For second-order injection risk, where stored data is later concatenated into SQL, use the final-query guard at the database boundary:
@@ -130,7 +179,7 @@ For second-order injection risk, where stored data is later concatenated into SQ
 ```javascript
 const { assertSafeSqlQuery } = require('sqlguardjs');
 
-assertSafeSqlQuery("SELECT * FROM users WHERE name = 'admin' OR 2>1");
+assertSafeSqlQuery(dynamicQuery);
 ```
 
 Keep using parameterized queries. This guard fails closed if unsafe dynamic SQL reaches the sink.
@@ -139,8 +188,9 @@ Keep using parameterized queries. This guard fails closed if unsafe dynamic SQL 
 
 ```javascript
 app.use(guard.global({
-  threshold: 0.9,
+  mode: 'log',
   learning: true,
+  logRequests: true,
   onLearningEvent(event) {
     console.info(event.clusterKey, event.payloadPreview);
   }
@@ -148,6 +198,64 @@ app.use(guard.global({
 ```
 
 Learning mode records suspicious allowed payloads for human review. It does not auto-train or mutate rules.
+
+## Detection Levels
+
+Use named levels when you do not want to tune numeric thresholds directly:
+
+```javascript
+app.use(guard.global({ level: 'strict' }));
+app.use(guard.global({ level: 'balanced' }));
+app.use(guard.global({ level: 'permissive' }));
+```
+
+- `strict` blocks lower-confidence signals.
+- `balanced` keeps the default behavior.
+- `permissive` observes high-confidence detections unless you explicitly set `mode: 'block'`.
+
+## False-Positive Suppression
+
+Suppress known safe routes or parameters with allowlists:
+
+```javascript
+app.use(guard.global({
+  allowRoutes: ['/admin/search'],
+  allowParams: ['query.q', 'body.description']
+}));
+```
+
+Lower sensitivity for a specific endpoint without disabling the guard everywhere:
+
+```javascript
+app.use(guard.global({
+  level: 'strict',
+  routeLevels: {
+    '/search': 'balanced'
+  }
+}));
+```
+
+Route keys can be plain paths such as `/search` or method-qualified paths such as `GET /search`.
+
+## NestJS
+
+For NestJS on the Express adapter, reuse the middleware directly:
+
+```javascript
+const { nestjsMiddleware } = require('sqlguardjs');
+
+consumer
+  .apply(nestjsMiddleware({ level: 'balanced' }))
+  .forRoutes('*');
+```
+
+If your project prefers class middleware:
+
+```javascript
+const { createNestMiddleware } = require('sqlguardjs');
+
+const SqlGuardMiddleware = createNestMiddleware({ mode: 'log' });
+```
 
 ## Traffic Tuning
 
@@ -158,7 +266,7 @@ const { evaluatePayloads } = require('sqlguardjs');
 
 const report = evaluatePayloads([
   { payload: 'hello world', label: 'benign' },
-  { payload: '<script>alert(1)</script>', label: 'xss' }
+  { payload: '<security-test-string>', label: 'xss' }
 ]);
 
 console.log(report.summary);
@@ -167,7 +275,7 @@ console.log(report.summary);
 ## CLI
 
 ```bash
-sqlguardjs scan "1 UNION/**/SELECT password FROM users--"
+sqlguardjs scan "<security-test-string>"
 sqlguardjs scan-file payloads.txt --format csv
 ```
 

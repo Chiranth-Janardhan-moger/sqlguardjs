@@ -3,8 +3,8 @@ const { sqlguardjs } = require('sqlguardjs');
 
 const app = express();
 const guard = sqlguardjs({
-  threshold: 0.5,
-  suspiciousThreshold: 0.2,
+  level: 'balanced',
+  logRequests: true,
   logAttacks: true
 });
 
@@ -13,6 +13,13 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Global scanner checks body, query, headers, and cookies before routes.
 app.use(guard.global({ scanParams: false }));
+
+function requireAdmin(req, res, next) {
+  if (process.env.ADMIN_TOKEN && req.headers.authorization === `Bearer ${process.env.ADMIN_TOKEN}`) return next();
+  return res.sendStatus(403);
+}
+
+app.get('/admin/sqlguard/logs', requireAdmin, guard.logsHandler());
 
 // Route verifier checks req.params after Express resolves them.
 app.get('/users/:id', guard.route(), (req, res) => {
