@@ -70,6 +70,10 @@ SQLGuardJS scans Express-visible data, including plain objects, arrays, buffers,
 
 The detector uses weighted signatures plus structural SQL-fragment and browser pseudo-protocol analysis, so boolean predicates, stacked statements, metadata enumeration, and constructor-chain browser vectors are not tied to one exact spelling.
 
+## 1.0.4 Bypass Hardening
+
+This release tightens SQL detection for unterminated block-comment breakouts, VALUES-based set-operation probes, and oversized payloads that try to hide suspicious content past the initial scan window. Long strings are still bounded, but SQLGuardJS now samples both the beginning and end of oversized inputs instead of only the prefix.
+
 ## Secure Router
 
 Use `secureRouter()` when you want the router to handle both global request scanning and route-level parameter/schema checks automatically.

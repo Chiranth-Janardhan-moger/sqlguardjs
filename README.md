@@ -765,7 +765,7 @@ Current result:
 
 ```text
 Test Suites: 11 passed, 11 total
-Tests: 165 passed, 165 total
+Tests: 168 passed, 168 total
 ```
 
 If you find a real bypass or false positive, add it as a test before changing any detector rule.

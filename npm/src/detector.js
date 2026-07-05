@@ -65,6 +65,7 @@ const NAMED_ENTITY_PATTERN = new RegExp(`&(${Object.keys(NAMED_ENTITIES).sort((a
 
 const sqlWord = (word) => word.split('').join('[\\s\\u00a0]*');
 const unionSelectPattern = (wordBuilder = word => word) => `\\b${wordBuilder('UNION')}(?:\\s+(?:${wordBuilder('ALL')}|${wordBuilder('DISTINCT')})\\s+|\\s+|\\s*\\(\\s*)${wordBuilder('SELECT')}\\b`;
+const unionValuesPattern = (wordBuilder = word => word) => `\\b${wordBuilder('UNION')}(?:\\s+(?:${wordBuilder('ALL')}|${wordBuilder('DISTINCT')})\\s+|\\s+|\\s*\\(\\s*)${wordBuilder('VALUES')}\\s*\\(`;
 const SQL_BOOLEAN_WORDS = new Set(['OR', 'AND', 'XOR']);
 const SQL_COMPARISON_WORDS = new Set(['LIKE']);
 const SQL_COMPARISON_OPERATORS = new Set(['=', '!=', '<>', '<=', '>=', '<', '>']);
@@ -905,6 +906,16 @@ class Detector {
         pattern: new RegExp(unionSelectPattern(sqlWord), 'i')
       },
       {
+        id: 'union-values',
+        confidence: 0.8,
+        pattern: new RegExp(unionValuesPattern(), 'i')
+      },
+      {
+        id: 'comment-fragmented-union-values',
+        confidence: 0.8,
+        pattern: new RegExp(unionValuesPattern(sqlWord), 'i')
+      },
+      {
         id: 'mysql-versioned-comment',
         confidence: 0.55,
         pattern: /(?:\/\*!\d{0,6}|MYSQL_VERSIONED_COMMENT)/i
@@ -953,6 +964,11 @@ class Detector {
         id: 'sql-comment-breakout',
         confidence: 0.55,
         pattern: /(?:['"`]\s*(?:--|#)(?:\s|$)|--\s*$|#\s*$)/i
+      },
+      {
+        id: 'sql-unclosed-block-comment-breakout',
+        confidence: 0.55,
+        pattern: /(?:['"`)]\s*\/\*(?![\s\S]*\*\/)|\/\*\s*$)/i
       },
       {
         id: 'time-delay',
@@ -1056,7 +1072,11 @@ class Detector {
   normalizePayload(payload, { sqlCommentMode = 'space' } = {}) {
     if (Buffer.isBuffer(payload)) payload = payload.toString('utf8');
     if (typeof payload !== 'string') return '';
-    if (payload.length > this.maxPayloadLength) payload = payload.substring(0, this.maxPayloadLength);
+    if (payload.length > this.maxPayloadLength) {
+      const headLength = Math.ceil(this.maxPayloadLength / 2);
+      const tailLength = Math.floor(this.maxPayloadLength / 2);
+      payload = `${payload.slice(0, headLength)}\nSQLGUARDJS_TRUNCATED\n${tailLength > 0 ? payload.slice(-tailLength) : ''}`;
+    }
     const decodeEntity = (match, hex, dec) => {
       const code = parseInt(hex || dec, hex ? 16 : 10);
       return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : match;

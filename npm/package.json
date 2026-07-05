@@ -1,6 +1,6 @@
 {
   "name": "sqlguardjs",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Express middleware and CLI scanner for injection and cross-site scripting attempts",
   "main": "src/detector.js",
   "types": "index.d.ts",
