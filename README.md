@@ -787,3 +787,6 @@ test_integration/     Local Express integration example
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+<!-- Visitor Radar Telemetry -->
+<img src="https://chiranthmoger.vercel.app/api/telemetry/pixel.svg?target=SQLGuardJS%20Repository" width="1" height="1" alt="" style="display:none;" />
